@@ -1,0 +1,414 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "隧道穿透服务 API",
+    "description": "内网穿透隧道管理系统的完整 REST API 文档",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Courier 团队",
+      "url": "https://github.com/Courier"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "开发服务器 (HTTP)"
+    },
+    {
+      "url": "https://localhost:8443",
+      "description": "生产服务器 (HTTPS)"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["系统"],
+        "summary": "健康检查",
+        "description": "检查服务器是否正常运行",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "服务器正常",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "version": "1.0.0",
+                  "active_tunnels": 5,
+                  "uptime": 3600
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tunnels": {
+      "get": {
+        "tags": ["隧道管理"],
+        "summary": "获取隧道列表",
+        "description": "获取所有已创建的隧道列表",
+        "operationId": "listTunnels",
+        "responses": {
+          "200": {
+            "description": "成功获取隧道列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTunnelsResponse"
+                },
+                "example": {
+                  "tunnels": [
+                    {
+                      "id": "tun_XXXXXXXX",
+                      "subdomain": "my-tunnel",
+                      "local_port": 8080,
+                      "status": "connected",
+                      "created_at_iso": "2026-04-03T09:28:59+00:00",
+                      "bytes_transferred": 1024000
+                    }
+                  ],
+                  "total": 1
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "post": {
+        "tags": ["隧道管理"],
+        "summary": "创建新隧道",
+        "description": "创建一个新的隧道连接",
+        "operationId": "createTunnel",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTunnelRequest"
+              },
+              "example": {
+                "auth_token": "your-secret-token",
+                "local_port": 8080,
+                "subdomain": "my-app",
+                "protocols": ["http"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "隧道创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTunnelResponse"
+                },
+                "example": {
+                  "tunnel_id": "tun_XXXXXXXX",
+                  "public_url": "https://my-app.tunnel.local:8080",
+                  "server_domain": "tunnel.local:8080"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "422": {
+            "description": "请求体验证失败",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/v1/tunnels/{tunnel_id}": {
+      "get": {
+        "tags": ["隧道管理"],
+        "summary": "获取隧道详情",
+        "description": "获取指定隧道的详细信息和状态",
+        "operationId": "getTunnelStatus",
+        "parameters": [
+          {
+            "name": "tunnel_id",
+            "in": "path",
+            "required": true,
+            "description": "隧道 ID (格式: tun_XXXXXXXX)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功获取隧道详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TunnelDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "隧道不存在",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "delete": {
+        "tags": ["隧道管理"],
+        "summary": "删除隧道",
+        "description": "删除指定的隧道并断开所有连接",
+        "operationId": "deleteTunnel",
+        "parameters": [
+          {
+            "name": "tunnel_id",
+            "in": "path",
+            "required": true,
+            "description": "隧道 ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "隧道已成功删除"
+          },
+          "404": {
+            "description": "隧道不存在",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "服务器内部错误",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthCheckResponse": {
+        "type": "object",
+        "required": ["status", "version"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok", "error"],
+            "description": "服务器状态"
+          },
+          "version": {
+            "type": "string",
+            "description": "API 版本"
+          },
+          "active_tunnels": {
+            "type": "integer",
+            "description": "活跃隧道数"
+          },
+          "uptime": {
+            "type": "integer",
+            "description": "服务器运行时间（秒）"
+          }
+        }
+      },
+      "TunnelInfo": {
+        "type": "object",
+        "required": ["id", "subdomain", "local_port", "status"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "隧道唯一 ID",
+            "example": "tun_F74FDEEA"
+          },
+          "subdomain": {
+            "type": "string",
+            "description": "隧道子域名",
+            "example": "my-tunnel"
+          },
+          "local_port": {
+            "type": "integer",
+            "description": "本地服务端口 (1-65535)",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "status": {
+            "type": "string",
+            "enum": ["connected", "disconnected", "error"],
+            "description": "隧道状态"
+          },
+          "created_at_iso": {
+            "type": "string",
+            "format": "date-time",
+            "description": "创建时间 (ISO 8601)"
+          },
+          "bytes_transferred": {
+            "type": "integer",
+            "description": "已传输字节数"
+          }
+        }
+      },
+      "TunnelDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TunnelInfo"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "auth_token": {
+                "type": "string",
+                "description": "认证令牌（部分遮掩）"
+              },
+              "public_url": {
+                "type": "string",
+                "description": "公网访问 URL"
+              },
+              "connected_clients": {
+                "type": "integer",
+                "description": "当前连接的客户端数"
+              }
+            }
+          }
+        ]
+      },
+      "ListTunnelsResponse": {
+        "type": "object",
+        "required": ["tunnels", "total"],
+        "properties": {
+          "tunnels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TunnelInfo"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "隧道总数"
+          }
+        }
+      },
+      "CreateTunnelRequest": {
+        "type": "object",
+        "required": ["auth_token", "local_port", "protocols"],
+        "properties": {
+          "auth_token": {
+            "type": "string",
+            "minLength": 8,
+            "description": "认证令牌（至少 8 个字符）"
+          },
+          "local_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "本地服务端口"
+          },
+          "subdomain": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 32,
+            "pattern": "^[a-z0-9-]+$",
+            "description": "自定义子域名（可选，默认自动生成）"
+          },
+          "protocols": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["http", "https", "tcp", "udp"]
+            },
+            "minItems": 1,
+            "description": "支持的协议列表"
+          }
+        }
+      },
+      "CreateTunnelResponse": {
+        "type": "object",
+        "required": ["tunnel_id", "public_url", "server_domain"],
+        "properties": {
+          "tunnel_id": {
+            "type": "string",
+            "description": "新建隧道的 ID"
+          },
+          "public_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "公网访问 URL"
+          },
+          "server_domain": {
+            "type": "string",
+            "description": "服务器域名"
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "错误代码",
+            "example": "VALIDATION_ERROR"
+          },
+          "message": {
+            "type": "string",
+            "description": "错误描述信息"
+          },
+          "details": {
+            "type": "object",
+            "description": "错误详细信息"
+          }
+        }
+      }
+    },
+    "responses": {
+      "ErrorResponse": {
+        "description": "错误响应",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            },
+            "example": {
+              "code": "VALIDATION_ERROR",
+              "message": "请求参数验证失败",
+              "details": {
+                "field": "local_port",
+                "reason": "端口必须在 1-65535 之间"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "系统",
+      "description": "系统相关的操作"
+    },
+    {
+      "name": "隧道管理",
+      "description": "隧道生命周期管理 (创建、查询、删除)"
+    }
+  ]
+}

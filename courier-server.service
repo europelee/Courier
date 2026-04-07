@@ -1,0 +1,44 @@
+[Unit]
+Description=Courier - 高性能内网穿透工具
+Documentation=https://github.com/your-org/Courier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=courier
+Group=courier
+WorkingDirectory=/opt/Courier
+Environment="DATABASE_PATH=/var/lib/Courier/tunnels.db"
+Environment="SERVER_DOMAIN=your-domain.com:8080"
+Environment="RUST_LOG=info"
+
+# 启动命令
+ExecStart=/opt/Courier/courier-server \
+    --port 8080 \
+    --database $DATABASE_PATH \
+    --server-domain $SERVER_DOMAIN
+
+# 重启策略
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# 日志输出
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=courier-server
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

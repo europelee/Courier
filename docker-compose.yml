@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # 后端服务 - Rust Axum 服务器
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: courier-server
+    ports:
+      - "8080:8080"      # HTTP
+      - "8443:8443"      # HTTPS
+    environment:
+      - PORT=8080
+      - SERVER_DOMAIN=localhost:8080
+      - DATABASE_URL=sqlite:./tunnel.db
+      - LOG_LEVEL=info
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./certs:/app/certs:ro           # 只读证书卷
+      - ./tunnel.db:/app/tunnel.db      # 数据库卷
+      - ./logs:/app/logs                # 日志卷
+    networks:
+      - tunnel-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - db
+
+  # ============================================================================
+  # 前端服务 - Vue3 应用 (Nginx)
+  # ============================================================================
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      target: frontend
+    container_name: tunnel-ui
+    ports:
+      - "3000:3000"      # HTTPS
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./web/dist:/app/dist:ro        # 构建输出卷
+      - ./certs:/app/certs:ro          # 证书卷
+    networks:
+      - tunnel-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - backend
+
+  # ============================================================================
+  # 数据库服务 - SQLite (可选，用于持久化)
+  # ============================================================================
+  db:
+    image: nouchka/sqlite3:latest
+    container_name: tunnel-db
+    volumes:
+      - ./data/db:/root/db              # 数据卷
+    networks:
+      - tunnel-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/root/db/tunnel.db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # 日志收集服务 - 可选
+  # ============================================================================
+  # 取消注释以启用日志收集
+  # logs:
+  #   image: prom/prometheus:latest
+  #   container_name: tunnel-logs
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  #   networks:
+  #     - tunnel-network
+  #   restart: unless-stopped
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  tunnel-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================================
+# 卷配置
+# ============================================================================
+volumes:
+  # SQLite 数据库卷
+  db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/db
+
+  # 日志卷
+  logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./logs
