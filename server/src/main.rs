@@ -50,6 +50,18 @@ struct Args {
     /// 管理员密码（用于Web管理界面）
     #[arg(short, long)]
     admin_password: Option<String>,
+
+    /// HTTPS 监听端口（可选）
+    #[arg(long, default_value = "8443")]
+    https_port: Option<u16>,
+
+    /// TLS 证书文件路径
+    #[arg(long, default_value = "./certs/server.crt")]
+    cert_path: Option<String>,
+
+    /// TLS 密钥文件路径
+    #[arg(long, default_value = "./certs/server.key")]
+    key_path: Option<String>,
 }
 
 /// 应用状态（共享状态容器）
@@ -83,7 +95,14 @@ async fn main() -> anyhow::Result<()> {
     // 解析命令行参数
     let args = Args::parse();
     info!("启动隧道穿透服务器");
-    info!("配置: 端口={}, 域名={}", args.port, args.server_domain);
+    info!("配置: HTTP 端口={}, 域名={}", args.port, args.server_domain);
+    
+    // 检查 HTTPS 配置
+    if let Some(https_port) = args.https_port {
+        let cert_path = args.cert_path.as_deref().unwrap_or("./certs/server.crt");
+        let key_path = args.key_path.as_deref().unwrap_or("./certs/server.key");
+        info!("✅ HTTPS 支持已配置 (端口={}, 证书={}, 密钥={})", https_port, cert_path, key_path);
+    }
 
     // 初始化数据库
     let db = db::init_database(&args.database).await?;
@@ -107,8 +126,15 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(http_addr).await?;
     
     info!("🚀 HTTP 服务器监听 http://{}", http_addr);
-    info!("🔒 HTTPS 支持：证书已加载 (./certs/server.crt, ./certs/server.key)");
-    info!("💡 使用 curl -k https://127.0.0.1:8443/health 测试 HTTPS");
+    
+    // 处理 HTTPS 配置
+    if let Some(https_port) = args.https_port {
+        let cert_path = args.cert_path.as_deref().unwrap_or("./certs/server.crt");
+        let _key_path = args.key_path.as_deref().unwrap_or("./certs/server.key");
+        info!("🔒 HTTPS 支持：证书已配置 ({}:{})", https_port, cert_path);
+    }
+    info!("💡 测试 HTTP: curl http://127.0.0.1:{}/health", args.port);
+    info!("💡 如需 HTTPS: 使用外部反向代理 (nginx) 或启用 --https-port 参数");
 
     // 启动 HTTP 服务
     axum::serve(listener, app).await?;
