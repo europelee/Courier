@@ -302,7 +302,7 @@
 
 ## 📞 联系方式
 
-- **GitHub** - https://github.com/Courier/Courier
+- **GitHub** - https://github.com/europelee/Courier
 - **Email** - support@Courier.dev
 - **Discord** - [加入社区](https://discord.gg/Courier)
 

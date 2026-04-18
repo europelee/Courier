@@ -28,11 +28,11 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/Courier/Courier.git
+git clone https://github.com/europelee/Courier.git
 cd Courier
 
 # 添加上游远程（用于同步最新代码）
-git remote add upstream https://github.com/Courier/Courier.git
+git remote add upstream https://github.com/europelee/Courier.git
 ```
 
 ### Step 2：安装依赖
@@ -189,7 +189,7 @@ export const getTunnels = async (): Promise<Tunnel[]> => {
 
 ### 1. Fork 项目
 
-访问 [项目主页](https://github.com/Courier/Courier)，点击 Fork 按钮。
+访问 [项目主页](https://github.com/europelee/Courier)，点击 Fork 按钮。
 
 ### 2. 创建功能分支
 
@@ -305,7 +305,7 @@ git push origin feature/your-feature-name
 
 ### 报告 Bug
 
-访问 [Issues 页面](https://github.com/Courier/Courier/issues)，点击 "New Issue"，选择 "Bug report"。
+访问 [Issues 页面](https://github.com/europelee/Courier/issues)，点击 "New Issue"，选择 "Bug report"。
 
 #### Bug 报告模板
 
@@ -414,7 +414,7 @@ git push origin feature/your-feature-name
 - [TypeScript 官方文档](https://www.typescriptlang.org/)
 
 ### 社区
-- [GitHub Discussions](https://github.com/Courier/Courier/discussions)
+- [GitHub Discussions](https://github.com/europelee/Courier/discussions)
 - [Discord 社区](https://discord.gg/Courier)
 
 ---

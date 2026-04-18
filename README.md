@@ -20,7 +20,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/Courier/Courier.git
+git clone https://github.com/europelee/Courier.git
 cd Courier
 
 # 生成自签名证书
@@ -277,7 +277,7 @@ cargo tarpaulin --out Html
 
 1. **Fork 项目**
    ```bash
-   git clone https://github.com/your-username/Courier.git
+   git clone https://github.com/europelee/Courier.git
    cd Courier
    git checkout -b feature/your-feature-name
    ```
@@ -333,15 +333,15 @@ MIT 许可证允许任何人：
 
 ### 获取帮助
 
-- **问题讨论**：[GitHub Issues](https://github.com/Courier/Courier/issues)
-- **功能请求**：[GitHub Discussions](https://github.com/Courier/Courier/discussions)
+- **问题讨论**：[GitHub Issues](https://github.com/europelee/Courier/issues)
+- **功能请求**：[GitHub Discussions](https://github.com/europelee/Courier/discussions)
 - **Email**：support@Courier.dev
 - **Discord**：[加入社区](https://discord.gg/Courier)
 
 ### 社交媒体
 
 - Twitter：[@TunnelPenetrator](https://twitter.com/TunnelPenetrator)
-- GitHub：[Courier](https://github.com/Courier)
+- GitHub：[Courier](https://github.com/europelee)
 
 ---
 
@@ -428,7 +428,7 @@ cp /path/to/key.key ./certs/server.key
 
 **最后更新：** 2026-04-04  
 **维护者：** Courier 团队  
-**GitHub：** https://github.com/Courier/Courier
+**GitHub：** https://github.com/europelee/Courier
 
 ---
 
@@ -436,6 +436,6 @@ cp /path/to/key.key ./certs/server.key
 
 **⭐ 如果这个项目对你有帮助，请给个 Star！**
 
-[访问项目](https://github.com/Courier/Courier) • [查看文档](./API_DOCUMENTATION.md) • [提交问题](https://github.com/Courier/Courier/issues)
+[访问项目](https://github.com/europelee/Courier) • [查看文档](./API_DOCUMENTATION.md) • [提交问题](https://github.com/europelee/Courier/issues)
 
 </div>

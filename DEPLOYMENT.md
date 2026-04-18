@@ -17,7 +17,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-org/Courier.git
+git clone https://github.com/europelee/Courier.git
 cd Courier
 
 # 启动服务
