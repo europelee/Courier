@@ -29,6 +29,12 @@ let value = some_result.unwrap(); // 禁止
 - `.expect("...")`（除非真的是不可能发生的不变量，需注释说明）
 - `panic!()`
 
+```rust
+// ✅ 合法的 expect（需有注释说明不变量）
+// 不变量：CONFIG 在程序启动时已初始化，此处不可能为 None
+let config = CONFIG.get().expect("CONFIG must be initialized at startup");
+```
+
 ## 异步规范
 
 - 全部使用 `tokio` 异步运行时
@@ -41,6 +47,11 @@ tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
 // ❌ 禁止
 std::thread::sleep(std::time::Duration::from_secs(1));
+
+// ✅ 正确：阻塞操作放入 spawn_blocking
+let result = tokio::task::spawn_blocking(|| {
+    std::fs::read_to_string("large_file.txt")
+}).await??;
 ```
 
 ## 命名约定
