@@ -199,39 +199,40 @@ async fn root_handler() -> impl IntoResponse {
 /// WebSocket 隧道处理器
 async fn ws_tunnel_handler(
     ws: WebSocketUpgrade,
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 /// 处理 WebSocket 连接
-async fn handle_socket(socket: WebSocket) {
+async fn handle_socket(socket: WebSocket, state: AppState) {
     use axum::extract::ws::Message;
     use uuid::Uuid;
-    
+
     info!("✅ 新的 WebSocket 连接建立");
-    
+
     let (mut sender, mut receiver) = socket.split();
-    
+
     while let Some(msg) = receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
                 info!("收到消息: {}", text);
-                
+
                 // 解析收到的注册请求
                 if let Ok(ws_msg) = serde_json::from_str::<courier_shared::WsMessage>(&text) {
                     if ws_msg.msg_type == "register" {
                         // 生成隧道信息
                         let courier_id = format!("tunnel_{}", Uuid::new_v4().to_string()[0..8].to_string());
                         let subdomain = format!("sub_{}", rand::random::<u32>());
-                        
+                        let server_domain = &state.config.server_domain;
+
                         // 返回正确格式的响应
                         let response = serde_json::json!({
                             "msg_type": "tunnel_established",
                             "data": {
                                 "courier_id": courier_id,
-                                "public_url": format!("https://{}.SERVER_DOMAIN_PLACEHOLDER:8888", subdomain),
-                                "server_domain": "SERVER_DOMAIN_PLACEHOLDER:8888",
+                                "public_url": format!("https://{}.{}", subdomain, server_domain),
+                                "server_domain": server_domain,
                                 "subdomain": subdomain
                             }
                         }).to_string();
