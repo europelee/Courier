@@ -4,6 +4,9 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Language](https://img.shields.io/badge/language-Rust%20%7C%20Vue3-orange)
 ![Status](https://img.shields.io/badge/status-Production%20Ready-brightgreen)
+![Built with AI](https://img.shields.io/badge/built%20with-Claude%20AI-blueviolet)
+
+> 本项目由 AI（Claude）全程开发。
 
 一个功能完整的内网穿透隧道管理系统，支持 HTTP/HTTPS/TCP/UDP 协议代理，提供 Web 管理界面和完整 REST API。
 
