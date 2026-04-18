@@ -87,8 +87,7 @@ temp/
 *.key
 *.crt
 *.cert
-certs/server.key
-certs/server.crt
+certs/
 !certs/.gitkeep
 
 # ============================================================================
