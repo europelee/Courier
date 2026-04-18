@@ -4,7 +4,11 @@
 
 ```
 Courier/
-├── shared/          ← 共享类型（WsMessage、HealthCheckResponse 等）
+├── shared/          ← 共享类型库（lib.rs 导出以下内容）
+│   └── src/
+│       └── lib.rs       ← 协议类型（WsMessage、RegisterRequest、CourierEstablished）
+│                           错误类型（CourierError、ErrorCode）
+│                           工具函数（generate_subdomain、validate_subdomain 等）
 ├── server/          ← 服务端（Axum HTTP + WebSocket 服务器）
 │   └── src/
 │       ├── main.rs       ← 入口、路由注册、AppState 定义
@@ -33,10 +37,10 @@ Courier/
 | 文件 | 职责 |
 |---|---|
 | `main.rs` | 启动服务、路由注册、`AppState`（db + config）定义 |
-| `handlers.rs` | REST 接口：`POST /api/v1/tunnels`、`GET`、`DELETE` |
+| `handlers.rs` | REST 接口：`POST /api/v1/tunnels`（create）、`GET /api/v1/tunnels`（list）、`GET /api/v1/tunnels/:courier_id`（get_tunnel_status）、`DELETE /api/v1/tunnels/:courier_id`（delete） |
 | `auth.rs` | JWT Claims 生成/验证，防重放（jti 字段） |
 | `db.rs` | SQLite 初始化、隧道 CRUD 查询（sqlx） |
-| `websocket.rs` | WebSocket 连接处理、隧道注册、子域名冲突检测 |
+| `websocket.rs` | WebSocket 连接处理、隧道注册、子域名冲突检测；维护 `WsConnectionManager`（`Arc<Mutex<HashMap>>` 连接状态管理器） |
 | `validation.rs` | 请求参数格式校验 |
 | `errors.rs` | 统一错误枚举（thiserror），转换为 HTTP 响应 |
 
@@ -74,7 +78,7 @@ client 进程连接 /ws
 ```rust
 struct AppState {
     db: SqlitePool,                // SQLite 连接池
-    config: Arc<ServerConfig>,    // 服务器配置（域名、管理员密码）
+    config: Arc<ServerConfig>,    // 含 server_domain: String, admin_password: Option<String>
 }
 ```
 
