@@ -148,8 +148,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import * as api from './api/tunnelApi'
+import { connectWebSocket, disconnectWebSocket } from './api/tunnelApi'
+import type { TunnelConnectedEvent, TunnelDisconnectedEvent, StatsUpdateEvent } from './api/tunnelApi'
 
 interface Tunnel {
   id: string
@@ -299,14 +301,50 @@ onMounted(async () => {
   addLog('INFO', '应用启动')
   await checkHealth()
   await fetchTunnels()
-  
-  // 定期刷新（每 5 秒）
-  setInterval(async () => {
-    await checkHealth()
-    if (currentView.value === 'tunnels') {
-      await fetchTunnels()
-    }
-  }, 5000)
+
+  connectWebSocket({
+    onConnected(evt: TunnelConnectedEvent) {
+      if (!tunnels.value.find(t => t.id === evt.courier_id)) {
+        tunnels.value.push({
+          id: evt.courier_id,
+          subdomain: evt.subdomain,
+          local_port: evt.local_port,
+          status: 'connected',
+          bytes_transferred: 0,
+        })
+        activeTunnels.value = tunnels.value.length
+      }
+      addLog('INFO', `隧道上线: ${evt.subdomain}`)
+    },
+    onDisconnected(evt: TunnelDisconnectedEvent) {
+      tunnels.value = tunnels.value.filter(t => t.id !== evt.courier_id)
+      activeTunnels.value = tunnels.value.length
+      addLog('INFO', `隧道下线: ${evt.courier_id}`)
+    },
+    onStatsUpdate(evt: StatsUpdateEvent) {
+      for (const stat of evt.tunnels) {
+        const t = tunnels.value.find(t => t.id === stat.courier_id)
+        if (t) t.bytes_transferred = stat.bytes_transferred
+      }
+      totalBytes.value = tunnels.value.reduce((sum, t) => sum + t.bytes_transferred, 0)
+    },
+    onSnapshot(evt: TunnelConnectedEvent) {
+      if (!tunnels.value.find(t => t.id === evt.courier_id)) {
+        tunnels.value.push({
+          id: evt.courier_id,
+          subdomain: evt.subdomain,
+          local_port: evt.local_port,
+          status: 'connected',
+          bytes_transferred: 0,
+        })
+        activeTunnels.value = tunnels.value.length
+      }
+    },
+  })
+})
+
+onUnmounted(() => {
+  disconnectWebSocket()
 })
 </script>
 
