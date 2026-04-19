@@ -49,7 +49,7 @@ impl Claims {
     pub fn new(user_id: String, expires_in_hours: u64) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         
         let exp = now + (expires_in_hours * 3600);
@@ -96,7 +96,7 @@ pub fn validate_auth_token(token: &str, secret: &str) -> Result<Claims, String> 
     // 验证过期时间
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
     
     if token_data.claims.exp < now {
@@ -164,7 +164,10 @@ pub async fn auth_middleware(
     req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let secret = state.config.admin_password.as_deref().unwrap_or("");
+    let secret = match state.config.admin_password.clone() {
+        Some(s) => s,
+        None => return Err(ApiError::Unauthorized("服务未配置管理员密码".to_string())),
+    };
 
     let auth_header = req
         .headers()
@@ -176,7 +179,7 @@ pub async fn auth_middleware(
     match auth_header {
         None => Err(ApiError::Unauthorized("缺少 Authorization header".to_string())),
         Some(token) => {
-            validate_auth_token(&token, secret)
+            validate_auth_token(&token, &secret)
                 .map_err(|e| ApiError::Unauthorized(e))?;
             Ok(next.run(req).await)
         }
@@ -258,6 +261,18 @@ mod tests {
         assert!(verify_password("secret", "secret"));
         assert!(!verify_password("secret", "wrong"));
         assert!(!verify_password("", "secret"));
+    }
+
+    /// 验证 Bearer 前缀剥离逻辑
+    #[test]
+    fn test_auth_middleware_extracts_bearer_correctly() {
+        let header_value = "Bearer my.test.token";
+        let extracted = header_value.strip_prefix("Bearer ").map(|s| s.to_string());
+        assert_eq!(extracted, Some("my.test.token".to_string()));
+
+        let no_bearer = "Basic dXNlcjpwYXNz";
+        let extracted2 = no_bearer.strip_prefix("Bearer ").map(|s| s.to_string());
+        assert_eq!(extracted2, None);
     }
 
     /// 测试令牌过期时间计算
