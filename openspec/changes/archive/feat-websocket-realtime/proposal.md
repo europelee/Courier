@@ -1,3 +1,5 @@
+**Status: done**
+
 ## Why
 
 当前前端通过每 5 秒轮询 REST API 获取隧道状态，courier-client 的 WebSocket 连接仅完成一次性握手后空置，无法实现流量转发。需要补全 WebSocket 实时通信，使隧道流量转发可用，并让管理界面实时感知隧道状态变化。
