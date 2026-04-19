@@ -113,7 +113,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     match ws_msg.msg_type.as_str() {
         "register" => handle_client_connection(sender, receiver, ws_msg.data, state).await,
-        "subscribe" => handle_subscriber_connection(sender, receiver, state).await,
+        "subscribe" => {
+            let token = ws_msg.data
+                .get("token")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let secret = state.config.admin_password.as_deref().unwrap_or("");
+            if auth::validate_auth_token(token, secret).is_err() {
+                return;
+            }
+            handle_subscriber_connection(sender, receiver, state).await
+        }
         _ => {}
     }
 }
