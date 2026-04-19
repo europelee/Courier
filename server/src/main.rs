@@ -221,59 +221,140 @@ async fn ws_tunnel_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-/// 处理 WebSocket 连接
+/// 处理 WebSocket 连接，根据首条消息分发到 client 或 subscriber 处理函数
 async fn handle_socket(socket: WebSocket, state: AppState) {
     use axum::extract::ws::Message;
+
+    let (sender, mut receiver) = socket.split();
+
+    let first_msg = match receiver.next().await {
+        Some(Ok(Message::Text(t))) => t,
+        _ => return,
+    };
+
+    let ws_msg: courier_shared::WsMessage = match serde_json::from_str(&first_msg) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    match ws_msg.msg_type.as_str() {
+        "register" => handle_client_connection(sender, receiver, ws_msg.data, state).await,
+        "subscribe" => handle_subscriber_connection(sender, receiver, state).await,
+        _ => {}
+    }
+}
+
+/// 处理 courier-client 隧道注册连接
+async fn handle_client_connection(
+    sender: futures_util::stream::SplitSink<WebSocket, axum::extract::ws::Message>,
+    mut receiver: futures_util::stream::SplitStream<WebSocket>,
+    data: serde_json::Value,
+    state: AppState,
+) {
+    use axum::extract::ws::Message;
+    use courier_shared::{RegisterRequest, WsMessage, HeartbeatAck};
     use uuid::Uuid;
 
-    info!("✅ 新的 WebSocket 连接建立");
+    let req: RegisterRequest = match serde_json::from_value(data) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
 
-    let (mut sender, mut receiver) = socket.split();
+    if req.auth_token.is_empty() {
+        return;
+    }
+
+    let courier_id = format!("tun_{}", &Uuid::new_v4().to_string()[..8].to_uppercase());
+    let subdomain = if req.subdomain.is_empty() {
+        courier_shared::generate_subdomain()
+    } else {
+        req.subdomain.clone()
+    };
+    let server_domain = state.config.server_domain.clone();
+    let public_url = format!("https://{}.{}", subdomain, server_domain);
+
+    if let Err(e) = crate::db::create_tunnel_with_unique_subdomain(
+        &state.db,
+        &courier_id,
+        &subdomain,
+        &req.auth_token,
+        req.local_port,
+    ).await {
+        error!("DB error registering tunnel: {}", e);
+        return;
+    }
+
+    let established_msg = WsMessage::new("tunnel_established", serde_json::json!({
+        "courier_id": courier_id,
+        "subdomain": subdomain,
+        "public_url": public_url,
+        "server_domain": server_domain,
+    }));
+
+    let session = websocket::ClientSession {
+        sender,
+        subdomain: subdomain.clone(),
+        local_port: req.local_port,
+        bytes_transferred: 0,
+    };
+
+    state.tunnel_registry.lock().await
+        .register_client_raw(courier_id.clone(), session, established_msg).await;
+
+    info!("courier-client registered: {} ({})", courier_id, subdomain);
 
     while let Some(msg) = receiver.next().await {
         match msg {
+            Ok(Message::Binary(data)) => {
+                let mut reg = state.tunnel_registry.lock().await;
+                if let Some(s) = reg.clients.get_mut(&courier_id) {
+                    s.bytes_transferred += data.len() as u64;
+                }
+            }
             Ok(Message::Text(text)) => {
-                info!("收到消息: {}", text);
-
-                // 解析收到的注册请求
-                if let Ok(ws_msg) = serde_json::from_str::<courier_shared::WsMessage>(&text) {
-                    if ws_msg.msg_type == "register" {
-                        // 生成隧道信息
-                        let courier_id = format!("tunnel_{}", Uuid::new_v4().to_string()[0..8].to_string());
-                        let subdomain = format!("sub_{}", rand::random::<u32>());
-                        let server_domain = &state.config.server_domain;
-
-                        // 返回正确格式的响应
-                        let response = serde_json::json!({
-                            "msg_type": "tunnel_established",
-                            "data": {
-                                "courier_id": courier_id,
-                                "public_url": format!("https://{}.{}", subdomain, server_domain),
-                                "server_domain": server_domain,
-                                "subdomain": subdomain
-                            }
-                        }).to_string();
-                        
-                        if let Err(e) = sender.send(Message::Text(response)).await {
-                            error!("发送失败: {}", e);
-                            break;
+                if let Ok(m) = serde_json::from_str::<WsMessage>(&text) {
+                    if m.msg_type == "heartbeat" {
+                        let ack_text = serde_json::to_string(&WsMessage::new(
+                            "heartbeat_ack",
+                            serde_json::to_value(HeartbeatAck { status: "ok".to_string() }).unwrap_or_default(),
+                        )).unwrap_or_default();
+                        let mut reg = state.tunnel_registry.lock().await;
+                        if let Some(s) = reg.clients.get_mut(&courier_id) {
+                            let _ = s.sender.send(Message::Text(ack_text)).await;
                         }
                     }
                 }
             }
-            Ok(Message::Close(_)) => {
-                info!("客户端关闭连接");
-                break;
-            }
-            Err(e) => {
-                error!("WebSocket 错误: {}", e);
-                break;
-            }
+            Ok(Message::Close(_)) | Err(_) => break,
             _ => {}
         }
     }
-    
-    info!("WebSocket 连接关闭");
+
+    let mut reg = state.tunnel_registry.lock().await;
+    reg.remove_client(&courier_id);
+    reg.broadcast_disconnected(&courier_id).await;
+    drop(reg);
+    let _ = crate::db::update_tunnel_status(&state.db, &courier_id, "disconnected").await;
+    info!("courier-client disconnected: {}", courier_id);
+}
+
+/// 处理前端 subscriber 订阅连接
+async fn handle_subscriber_connection(
+    sender: futures_util::stream::SplitSink<WebSocket, axum::extract::ws::Message>,
+    mut receiver: futures_util::stream::SplitStream<WebSocket>,
+    state: AppState,
+) {
+    use axum::extract::ws::Message;
+    state.tunnel_registry.lock().await.add_subscriber(sender).await;
+    info!("frontend subscriber connected");
+
+    while let Some(msg) = receiver.next().await {
+        match msg {
+            Ok(Message::Close(_)) | Err(_) => break,
+            _ => {}
+        }
+    }
+    info!("frontend subscriber disconnected");
 }
 
 /// ============================================================================
@@ -433,5 +514,20 @@ mod tests {
         fn _check_field(state: &AppState) {
             let _: &std::sync::Arc<tokio::sync::Mutex<crate::websocket::TunnelRegistry>> = &state.tunnel_registry;
         }
+    }
+
+    #[tokio::test]
+    async fn test_handle_socket_router_compiles() {
+        let db = crate::db::init_database("sqlite::memory:").await.unwrap();
+        let registry = std::sync::Arc::new(tokio::sync::Mutex::new(websocket::TunnelRegistry::new()));
+        let state = AppState {
+            db,
+            config: std::sync::Arc::new(ServerConfig {
+                server_domain: "localhost:8080".to_string(),
+                admin_password: None,
+            }),
+            tunnel_registry: registry,
+        };
+        let _router = build_router(state);
     }
 }
