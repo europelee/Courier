@@ -372,10 +372,14 @@ const handleLogin = async () => {
     setStoredToken(resp.token)
     isLoggedIn.value = true
     loginPassword.value = ''
-    fetchTunnels()
+    await fetchTunnels()
     connectWebSocket(wsHandlers)
-  } catch {
-    loginError.value = '密码错误，请重试'
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('401')) {
+      loginError.value = '密码错误，请重试'
+    } else {
+      loginError.value = '登录失败，请检查服务器连接'
+    }
   } finally {
     isLoggingIn.value = false
   }
@@ -391,9 +395,10 @@ const handleLogout = () => {
 onMounted(async () => {
   addLog('INFO', '应用启动')
   await checkHealth()
-  await fetchTunnels()
-
-  connectWebSocket(wsHandlers)
+  if (isLoggedIn.value) {
+    await fetchTunnels()
+    connectWebSocket(wsHandlers)
+  }
 })
 
 onUnmounted(() => {
