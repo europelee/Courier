@@ -22,6 +22,8 @@ pub enum ApiError {
     DatabaseError(String),
     /// 内部服务器错误（500）
     InternalError(String),
+    /// 未授权（401）
+    Unauthorized(String),
 }
 
 impl fmt::Display for ApiError {
@@ -34,6 +36,7 @@ impl fmt::Display for ApiError {
             ApiError::NotFound(msg) => write!(f, "未找到：{}", msg),
             ApiError::DatabaseError(msg) => write!(f, "数据库错误：{}", msg),
             ApiError::InternalError(msg) => write!(f, "服务器错误：{}", msg),
+            ApiError::Unauthorized(msg) => write!(f, "未授权：{}", msg),
         }
     }
 }
@@ -68,6 +71,12 @@ impl IntoResponse for ApiError {
             ApiError::InternalError(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
+                msg.clone(),
+                json!({}),
+            ),
+            ApiError::Unauthorized(msg) => (
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
                 msg.clone(),
                 json!({}),
             ),
