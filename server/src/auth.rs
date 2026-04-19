@@ -5,10 +5,19 @@
 //! - 过期时间检查
 //! - 令牌 ID（防重放攻击）
 
+use axum::{
+    extract::Request,
+    http::header::AUTHORIZATION,
+    middleware::Next,
+    response::Response,
+};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
+use crate::errors::ApiError;
+use crate::AppState;
 
 /// JWT 声明（Claims）
 /// 
@@ -129,6 +138,51 @@ pub fn generate_token(user_id: String, expires_in_hours: u64, secret: &str) -> R
     })
 }
 
+/// 以常量时间比较密码，防止计时攻击
+///
+/// # 参数
+/// * `input` - 用户输入的密码
+/// * `expected` - 预期密码
+///
+/// # 返回
+/// 密码匹配时返回 true，否则返回 false
+pub fn verify_password(input: &str, expected: &str) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+    input.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
+/// JWT 认证中间件
+///
+/// 从 Authorization: Bearer <token> 头中提取并验证令牌
+///
+/// # 返回
+/// 验证通过则调用下一个处理器，否则返回 401 Unauthorized
+pub async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let secret = state.config.admin_password.as_deref().unwrap_or("");
+
+    let auth_header = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+
+    match auth_header {
+        None => Err(ApiError::Unauthorized("缺少 Authorization header".to_string())),
+        Some(token) => {
+            validate_auth_token(&token, secret)
+                .map_err(|e| ApiError::Unauthorized(e))?;
+            Ok(next.run(req).await)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +251,13 @@ mod tests {
         let result = validate_auth_token("", TEST_SECRET);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Empty auth token");
+    }
+
+    #[test]
+    fn test_verify_password_constant_time() {
+        assert!(verify_password("secret", "secret"));
+        assert!(!verify_password("secret", "wrong"));
+        assert!(!verify_password("", "secret"));
     }
 
     /// 测试令牌过期时间计算
