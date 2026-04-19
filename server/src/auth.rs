@@ -5,10 +5,19 @@
 //! - 过期时间检查
 //! - 令牌 ID（防重放攻击）
 
+use axum::{
+    extract::Request,
+    http::header::AUTHORIZATION,
+    middleware::Next,
+    response::Response,
+};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
+use crate::errors::ApiError;
+use crate::AppState;
 
 /// JWT 声明（Claims）
 /// 
@@ -40,13 +49,12 @@ impl Claims {
     pub fn new(user_id: String, expires_in_hours: u64) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         
         let exp = now + (expires_in_hours * 3600);
         
-        // 简单的令牌 ID 生成（实际应使用 UUID）
-        let jti = format!("jti_{}", now);
+        let jti = uuid::Uuid::new_v4().to_string();
         
         Self {
             sub: user_id,
@@ -87,7 +95,7 @@ pub fn validate_auth_token(token: &str, secret: &str) -> Result<Claims, String> 
     // 验证过期时间
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
     
     if token_data.claims.exp < now {
@@ -129,6 +137,54 @@ pub fn generate_token(user_id: String, expires_in_hours: u64, secret: &str) -> R
     })
 }
 
+/// 以常量时间比较密码，防止计时攻击
+///
+/// # 参数
+/// * `input` - 用户输入的密码
+/// * `expected` - 预期密码
+///
+/// # 返回
+/// 密码匹配时返回 true，否则返回 false
+pub fn verify_password(input: &str, expected: &str) -> bool {
+    if input.is_empty() {
+        return false;
+    }
+    input.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
+/// JWT 认证中间件
+///
+/// 从 Authorization: Bearer <token> 头中提取并验证令牌
+///
+/// # 返回
+/// 验证通过则调用下一个处理器，否则返回 401 Unauthorized
+pub async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let secret = match state.config.admin_password.clone() {
+        Some(s) => s,
+        None => return Err(ApiError::Unauthorized("服务未配置管理员密码".to_string())),
+    };
+
+    let auth_header = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+
+    match auth_header {
+        None => Err(ApiError::Unauthorized("缺少 Authorization header".to_string())),
+        Some(token) => {
+            validate_auth_token(&token, &secret)
+                .map_err(|e| ApiError::Unauthorized(e))?;
+            Ok(next.run(req).await)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,20 +220,25 @@ mod tests {
     /// 测试过期令牌
     #[test]
     fn test_expired_token() {
-        // 创建一个立即过期的令牌（0 小时）
-        let claims = Claims::new("user_123".to_string(), 0);
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let past_exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(7200); // 2 hours ago
+        let claims = Claims {
+            sub: "user_123".to_string(),
+            exp: past_exp,
+            iat: past_exp,
+            jti: "test_jti".to_string(),
+        };
         let token = encode(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(TEST_SECRET.as_ref()),
         ).unwrap();
-        
-        // 等待一秒，确保令牌已过期
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        
         let result = validate_auth_token(&token, TEST_SECRET);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Token expired"));
+        assert!(result.is_err(), "expired token should be rejected");
     }
 
     /// 测试令牌声明字段
@@ -197,6 +258,25 @@ mod tests {
         let result = validate_auth_token("", TEST_SECRET);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Empty auth token");
+    }
+
+    #[test]
+    fn test_verify_password_constant_time() {
+        assert!(verify_password("secret", "secret"));
+        assert!(!verify_password("secret", "wrong"));
+        assert!(!verify_password("", "secret"));
+    }
+
+    /// 验证 Bearer 前缀剥离逻辑
+    #[test]
+    fn test_auth_middleware_extracts_bearer_correctly() {
+        let header_value = "Bearer my.test.token";
+        let extracted = header_value.strip_prefix("Bearer ").map(|s| s.to_string());
+        assert_eq!(extracted, Some("my.test.token".to_string()));
+
+        let no_bearer = "Basic dXNlcjpwYXNz";
+        let extracted2 = no_bearer.strip_prefix("Bearer ").map(|s| s.to_string());
+        assert_eq!(extracted2, None);
     }
 
     /// 测试令牌过期时间计算

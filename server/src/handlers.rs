@@ -63,7 +63,6 @@ pub async fn register_tunnel(
     Json(req): Json<ApiRegisterRequest>,
 ) -> Result<impl IntoResponse, crate::errors::ApiError> {
     // 验证认证令牌
-    // TODO: 实现实际的token验证逻辑
     if req.auth_token.is_empty() {
         return Err(CourierError::InvalidAuth("Auth token is empty".to_string()).into());
     }
@@ -139,12 +138,35 @@ pub async fn get_tunnel_status(
     Ok(Json(response))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_handler_validation() {
-        // 基础的处理器逻辑测试将在集成测试中进行
-    }
+#[derive(Debug, serde::Deserialize)]
+pub struct LoginRequest {
+    pub password: Option<String>,
 }
+
+#[derive(Debug, serde::Serialize)]
+pub struct LoginResponse {
+    pub token: String,
+    pub expires_in: u64,
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    Json(req): Json<LoginRequest>,
+) -> Result<Json<LoginResponse>, crate::errors::ApiError> {
+    let password = req.password.ok_or_else(|| {
+        crate::errors::ApiError::ValidationError("password 字段必填".to_string())
+    })?;
+
+    let admin_password = state.config.admin_password.as_deref()
+        .ok_or_else(|| crate::errors::ApiError::InternalError("服务未配置管理员密码".to_string()))?;
+
+    if !crate::auth::verify_password(&password, admin_password) {
+        return Err(crate::errors::ApiError::Unauthorized("密码错误".to_string()));
+    }
+
+    let token = crate::auth::generate_token("admin".to_string(), 24, admin_password)
+        .map_err(|e| crate::errors::ApiError::InternalError(e))?;
+
+    Ok(Json(LoginResponse { token, expires_in: 86400 }))
+}
+

@@ -4,6 +4,25 @@
 
 const API_BASE_URL = 'http://localhost:8080';
 
+const TOKEN_KEY = 'auth_token'
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function setStoredToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearStoredToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getStoredToken()
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
+
 export interface Tunnel {
   id: string;
   subdomain: string;
@@ -41,6 +60,7 @@ export const getTunnels = async (): Promise<ListTunnelsResponse> => {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
     });
 
@@ -51,7 +71,6 @@ export const getTunnels = async (): Promise<ListTunnelsResponse> => {
     const data = await res.json();
     return data as ListTunnelsResponse;
   } catch (error) {
-    console.error('获取隧道列表失败:', error);
     throw error;
   }
 };
@@ -65,6 +84,7 @@ export const createTunnel = async (data: CreateTunnelRequest): Promise<CreateTun
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify(data),
     });
@@ -76,7 +96,6 @@ export const createTunnel = async (data: CreateTunnelRequest): Promise<CreateTun
     const responseData = await res.json();
     return responseData as CreateTunnelResponse;
   } catch (error) {
-    console.error('创建隧道失败:', error);
     throw error;
   }
 };
@@ -90,6 +109,7 @@ export const deleteTunnel = async (tunnelId: string): Promise<void> => {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
     });
 
@@ -97,7 +117,6 @@ export const deleteTunnel = async (tunnelId: string): Promise<void> => {
       throw new Error(`HTTP error! status: ${res.status}`);
     }
   } catch (error) {
-    console.error('删除隧道失败:', error);
     throw error;
   }
 };
@@ -120,10 +139,26 @@ export const checkHealth = async (): Promise<{ status: string }> => {
 
     return await res.json();
   } catch (error) {
-    console.error('健康检查失败:', error);
     throw error;
   }
 };
+
+export interface LoginResponse {
+  token: string
+  expires_in: number
+}
+
+export const login = async (password: string): Promise<LoginResponse> => {
+  const res = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP error! status: ${res.status}`)
+  }
+  return res.json()
+}
 
 // ===== WebSocket 实时订阅 =====
 
@@ -164,7 +199,8 @@ export function connectWebSocket(handlers: WsEventHandler): void {
 
   ws.onopen = () => {
     reconnectDelay = 1000
-    ws!.send(JSON.stringify({ msg_type: 'subscribe', data: {} }))
+    const token = getStoredToken() ?? ''
+    ws!.send(JSON.stringify({ msg_type: 'subscribe', data: { token } }))
   }
 
   ws.onmessage = (event) => {

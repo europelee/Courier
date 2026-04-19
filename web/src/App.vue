@@ -1,5 +1,29 @@
 <template>
-  <div class="app-container">
+  <!-- 登录页 -->
+  <div v-if="!isLoggedIn" class="login-container">
+    <div class="login-card">
+      <h1>Courier 管理后台</h1>
+      <form @submit.prevent="handleLogin">
+        <div class="form-group">
+          <label>管理员密码</label>
+          <input
+            v-model="loginPassword"
+            type="password"
+            required
+            placeholder="请输入管理员密码"
+            :disabled="isLoggingIn"
+          >
+        </div>
+        <div v-if="loginError" class="error-banner">{{ loginError }}</div>
+        <button type="submit" class="btn btn-primary" :disabled="isLoggingIn">
+          {{ isLoggingIn ? '登录中...' : '登录' }}
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 管理界面（已登录） -->
+  <div v-else class="app-container">
     <!-- 侧边栏 -->
     <nav class="sidebar">
       <div class="logo">
@@ -28,6 +52,7 @@
         <div class="header-info">
           <span>服务器状态: {{ serverStatus }}</span>
           <span>隧道数: {{ activeTunnels }}</span>
+          <button @click="handleLogout" class="btn btn-small btn-danger">登出</button>
         </div>
       </header>
 
@@ -150,8 +175,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import * as api from './api/tunnelApi'
-import { connectWebSocket, disconnectWebSocket } from './api/tunnelApi'
-import type { TunnelConnectedEvent, TunnelDisconnectedEvent, StatsUpdateEvent } from './api/tunnelApi'
+import { connectWebSocket, disconnectWebSocket, login as apiLogin, setStoredToken, clearStoredToken, getStoredToken } from './api/tunnelApi'
+import type { TunnelConnectedEvent, TunnelDisconnectedEvent, StatsUpdateEvent, WsEventHandler } from './api/tunnelApi'
 
 interface Tunnel {
   id: string
@@ -162,6 +187,10 @@ interface Tunnel {
 }
 
 const currentView = ref<string>('tunnels')
+const isLoggedIn = ref<boolean>(!!getStoredToken())
+const loginPassword = ref<string>('')
+const loginError = ref<string>('')
+const isLoggingIn = ref<boolean>(false)
 const tunnels = ref<Tunnel[]>([])
 const logs = ref<Array<{ timestamp: string; level: string; message: string }>>([])
 const serverStatus = ref('正常')
@@ -216,7 +245,6 @@ const fetchTunnels = async () => {
     activeTunnels.value = response.total
     addLog('INFO', `成功加载 ${response.total} 个隧道`)
   } catch (error) {
-    console.error('获取隧道列表失败:', error)
     errorMessage.value = '获取隧道列表失败：' + String(error)
     addLog('ERROR', '获取隧道列表失败：' + String(error))
   } finally {
@@ -254,7 +282,6 @@ const createTunnel = async () => {
     // 刷新列表
     await fetchTunnels()
   } catch (error) {
-    console.error('创建隧道失败:', error)
     errorMessage.value = '创建隧道失败：' + String(error)
     addLog('ERROR', '创建隧道失败：' + String(error))
   } finally {
@@ -272,7 +299,6 @@ const deleteTunnel = async (tunnelId: string) => {
     addLog('INFO', `隧道已删除：${tunnelId}`)
     await fetchTunnels()
   } catch (error) {
-    console.error('删除隧道失败:', error)
     errorMessage.value = '删除隧道失败：' + String(error)
     addLog('ERROR', '删除隧道失败：' + String(error))
   }
@@ -296,51 +322,83 @@ const checkHealth = async () => {
   }
 }
 
+// WebSocket 事件处理器
+const wsHandlers: WsEventHandler = {
+  onConnected(evt: TunnelConnectedEvent) {
+    if (!tunnels.value.find(t => t.id === evt.courier_id)) {
+      tunnels.value.push({
+        id: evt.courier_id,
+        subdomain: evt.subdomain,
+        local_port: evt.local_port,
+        status: 'connected',
+        bytes_transferred: 0,
+      })
+      activeTunnels.value = tunnels.value.length
+    }
+    addLog('INFO', `隧道上线: ${evt.subdomain}`)
+  },
+  onDisconnected(evt: TunnelDisconnectedEvent) {
+    tunnels.value = tunnels.value.filter(t => t.id !== evt.courier_id)
+    activeTunnels.value = tunnels.value.length
+    addLog('INFO', `隧道下线: ${evt.courier_id}`)
+  },
+  onStatsUpdate(evt: StatsUpdateEvent) {
+    for (const stat of evt.tunnels) {
+      const t = tunnels.value.find(t => t.id === stat.courier_id)
+      if (t) t.bytes_transferred = stat.bytes_transferred
+    }
+    totalBytes.value = tunnels.value.reduce((sum, t) => sum + t.bytes_transferred, 0)
+  },
+  onSnapshot(evt: TunnelConnectedEvent) {
+    if (!tunnels.value.find(t => t.id === evt.courier_id)) {
+      tunnels.value.push({
+        id: evt.courier_id,
+        subdomain: evt.subdomain,
+        local_port: evt.local_port,
+        status: 'connected',
+        bytes_transferred: 0,
+      })
+      activeTunnels.value = tunnels.value.length
+    }
+  },
+}
+
+const handleLogin = async () => {
+  if (!loginPassword.value) return
+  isLoggingIn.value = true
+  loginError.value = ''
+  try {
+    const resp = await apiLogin(loginPassword.value)
+    setStoredToken(resp.token)
+    isLoggedIn.value = true
+    loginPassword.value = ''
+    await fetchTunnels()
+    connectWebSocket(wsHandlers)
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('401')) {
+      loginError.value = '密码错误，请重试'
+    } else {
+      loginError.value = '登录失败，请检查服务器连接'
+    }
+  } finally {
+    isLoggingIn.value = false
+  }
+}
+
+const handleLogout = () => {
+  clearStoredToken()
+  isLoggedIn.value = false
+  disconnectWebSocket()
+}
+
 // 初始化
 onMounted(async () => {
   addLog('INFO', '应用启动')
   await checkHealth()
-  await fetchTunnels()
-
-  connectWebSocket({
-    onConnected(evt: TunnelConnectedEvent) {
-      if (!tunnels.value.find(t => t.id === evt.courier_id)) {
-        tunnels.value.push({
-          id: evt.courier_id,
-          subdomain: evt.subdomain,
-          local_port: evt.local_port,
-          status: 'connected',
-          bytes_transferred: 0,
-        })
-        activeTunnels.value = tunnels.value.length
-      }
-      addLog('INFO', `隧道上线: ${evt.subdomain}`)
-    },
-    onDisconnected(evt: TunnelDisconnectedEvent) {
-      tunnels.value = tunnels.value.filter(t => t.id !== evt.courier_id)
-      activeTunnels.value = tunnels.value.length
-      addLog('INFO', `隧道下线: ${evt.courier_id}`)
-    },
-    onStatsUpdate(evt: StatsUpdateEvent) {
-      for (const stat of evt.tunnels) {
-        const t = tunnels.value.find(t => t.id === stat.courier_id)
-        if (t) t.bytes_transferred = stat.bytes_transferred
-      }
-      totalBytes.value = tunnels.value.reduce((sum, t) => sum + t.bytes_transferred, 0)
-    },
-    onSnapshot(evt: TunnelConnectedEvent) {
-      if (!tunnels.value.find(t => t.id === evt.courier_id)) {
-        tunnels.value.push({
-          id: evt.courier_id,
-          subdomain: evt.subdomain,
-          local_port: evt.local_port,
-          status: 'connected',
-          bytes_transferred: 0,
-        })
-        activeTunnels.value = tunnels.value.length
-      }
-    },
-  })
+  if (isLoggedIn.value) {
+    await fetchTunnels()
+    connectWebSocket(wsHandlers)
+  }
 })
 
 onUnmounted(() => {
@@ -673,5 +731,38 @@ onUnmounted(() => {
 
 .btn-small:hover {
   background: #e0e0e0;
+}
+
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: #f0f2f5;
+}
+
+.login-card {
+  background: #fff;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  width: 360px;
+}
+
+.login-card h1 {
+  margin-bottom: 24px;
+  font-size: 20px;
+  text-align: center;
+  color: #333;
+}
+
+.btn-danger {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
 }
 </style>
