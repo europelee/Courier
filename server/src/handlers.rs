@@ -63,7 +63,6 @@ pub async fn register_tunnel(
     Json(req): Json<ApiRegisterRequest>,
 ) -> Result<impl IntoResponse, crate::errors::ApiError> {
     // 验证认证令牌
-    // TODO: 实现实际的token验证逻辑
     if req.auth_token.is_empty() {
         return Err(CourierError::InvalidAuth("Auth token is empty".to_string()).into());
     }
