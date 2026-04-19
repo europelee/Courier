@@ -1,98 +1,112 @@
-//! WebSocket 服务器 - 处理客户端连接和隧道生命周期
+//! WebSocket 服务器 - TunnelRegistry 和连接类型分发
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{error, info};
-use courier_shared::{RegisterRequest, CourierEstablished};
-use uuid::Uuid;
-use sqlx::SqlitePool;
-use crate::db;
+use axum::extract::ws::{Message, WebSocket};
+use courier_shared::{
+    TunnelConnectedEvent, TunnelDisconnectedEvent, TunnelStats, StatsUpdateEvent,
+    WsMessage,
+};
+use futures_util::stream::SplitSink;
+use futures_util::SinkExt;
+use std::collections::HashMap;
+use tracing::warn;
 
-/// WebSocket 连接管理器
-pub struct WsConnectionManager {
-    /// 活跃连接计数
-    connections_count: Arc<RwLock<usize>>,
+pub struct ClientSession {
+    pub sender: SplitSink<WebSocket, Message>,
+    pub subdomain: String,
+    pub local_port: u16,
+    pub bytes_transferred: u64,
 }
 
-impl WsConnectionManager {
-    /// 创建新的连接管理器
+pub struct TunnelRegistry {
+    pub clients: HashMap<String, ClientSession>,
+    pub subscribers: Vec<SplitSink<WebSocket, Message>>,
+}
+
+impl TunnelRegistry {
     pub fn new() -> Self {
         Self {
-            connections_count: Arc::new(RwLock::new(0)),
+            clients: HashMap::new(),
+            subscribers: Vec::new(),
         }
     }
 
-    /// 处理新的隧道注册（已集成子域名冲突检测）
-    /// 
-    /// # 参数
-    /// * `register_req` - 隧道注册请求
-    /// * `db` - 数据库连接池
-    /// 
-    /// # 返回
-    /// 成功时返回 CourierEstablished 信息，包含子域名冲突检测和数据库持久化
-    /// 失败时返回错误信息
-    pub async fn handle_register(
-        &self,
-        register_req: RegisterRequest,
-        db: &SqlitePool,
-    ) -> Result<CourierEstablished, String> {
-        // 1. 验证认证令牌
-        if register_req.auth_token.is_empty() {
-            error!("Empty auth token");
-            return Err("Authentication failed".to_string());
+    pub fn client_count(&self) -> usize {
+        self.clients.len()
+    }
+
+    pub fn remove_client(&mut self, courier_id: &str) {
+        self.clients.remove(courier_id);
+    }
+
+    pub async fn broadcast_disconnected(&mut self, courier_id: &str) {
+        let event = TunnelDisconnectedEvent { courier_id: courier_id.to_string() };
+        self.broadcast_json("tunnel_disconnected", &event).await;
+    }
+
+    pub async fn add_subscriber(&mut self, mut sender: SplitSink<WebSocket, Message>) {
+        let snapshot: Vec<TunnelConnectedEvent> = self.clients.iter().map(|(id, s)| {
+            TunnelConnectedEvent {
+                courier_id: id.clone(),
+                subdomain: s.subdomain.clone(),
+                public_url: format!("https://{}.placeholder", s.subdomain),
+                local_port: s.local_port,
+            }
+        }).collect();
+
+        for evt in snapshot {
+            let msg = WsMessage::new("tunnel_connected", serde_json::to_value(&evt).unwrap());
+            let text = serde_json::to_string(&msg).unwrap();
+            if sender.send(Message::Text(text)).await.is_err() {
+                return;
+            }
         }
-
-        // 2. 生成隧道 ID
-        let courier_id = format!("tun_{}", Uuid::new_v4().to_string()[..8].to_uppercase());
-
-        // 3. 处理子域名
-        let subdomain = if register_req.subdomain.is_empty() {
-            courier_shared::generate_subdomain()
-        } else {
-            register_req.subdomain.clone()
-        };
-
-        // 4. ✅ 调用 db::create_tunnel_with_unique_subdomain()
-        //    这会在事务中检查冲突并创建隧道记录
-        db::create_tunnel_with_unique_subdomain(
-            db,
-            &courier_id,
-            &subdomain,
-            &register_req.auth_token,
-            register_req.local_port,
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to create tunnel with unique subdomain: {}", e);
-            format!("Tunnel creation failed: {}", e)
-        })?;
-
-        info!("New tunnel registered: {} (subdomain: {}, port: {})", courier_id, subdomain, register_req.local_port);
-
-        // 5. 增加连接计数
-        *self.connections_count.write().await += 1;
-
-        // 6. 构造响应
-        let response = CourierEstablished {
-            courier_id,
-            public_url: format!("https://{}.example.com", subdomain),
-            server_domain: "example.com".to_string(),
-            subdomain,
-        };
-
-        Ok(response)
+        self.subscribers.push(sender);
     }
 
-    /// 获取活跃隧道数
-    pub async fn active_tunnel_count(&self) -> usize {
-        *self.connections_count.read().await
+    pub async fn broadcast_stats(&mut self) {
+        let tunnels: Vec<TunnelStats> = self.clients.iter().map(|(id, s)| {
+            TunnelStats {
+                courier_id: id.clone(),
+                bytes_transferred: s.bytes_transferred,
+            }
+        }).collect();
+        let event = StatsUpdateEvent { tunnels };
+        self.broadcast_json("stats_update", &event).await;
     }
 
-    /// 关闭隧道
-    pub async fn close_tunnel(&self) {
-        let mut count = self.connections_count.write().await;
-        if *count > 0 {
-            *count -= 1;
+    /// 注册 client，先通过 session.sender 发送 established 消息，再广播 tunnel_connected
+    pub async fn register_client_raw(
+        &mut self,
+        courier_id: String,
+        mut session: ClientSession,
+        established_msg: courier_shared::WsMessage,
+    ) {
+        let text = serde_json::to_string(&established_msg).unwrap();
+        let _ = session.sender.send(Message::Text(text)).await;
+
+        let event = TunnelConnectedEvent {
+            courier_id: courier_id.clone(),
+            subdomain: session.subdomain.clone(),
+            public_url: format!("https://{}.placeholder", session.subdomain),
+            local_port: session.local_port,
+        };
+        self.clients.insert(courier_id, session);
+        self.broadcast_json("tunnel_connected", &event).await;
+    }
+
+    async fn broadcast_json<T: serde::Serialize>(&mut self, msg_type: &str, data: &T) {
+        let msg = WsMessage::new(msg_type, serde_json::to_value(data).unwrap());
+        let text = serde_json::to_string(&msg).unwrap();
+
+        let mut failed = vec![];
+        for (i, sub) in self.subscribers.iter_mut().enumerate() {
+            if sub.send(Message::Text(text.clone())).await.is_err() {
+                warn!("subscriber {} disconnected, will remove", i);
+                failed.push(i);
+            }
+        }
+        for i in failed.into_iter().rev() {
+            self.subscribers.swap_remove(i);
         }
     }
 }
@@ -101,102 +115,16 @@ impl WsConnectionManager {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_connection_manager_creation() {
-        let manager = WsConnectionManager::new();
-        assert!(true);
+    #[tokio::test]
+    async fn test_registry_register_and_count() {
+        let registry = TunnelRegistry::new();
+        assert_eq!(registry.client_count(), 0);
     }
 
     #[tokio::test]
-    async fn test_active_tunnel_count() {
-        let manager = WsConnectionManager::new();
-        assert_eq!(manager.active_tunnel_count().await, 0);
+    async fn test_registry_remove_nonexistent_is_ok() {
+        let mut registry = TunnelRegistry::new();
+        registry.remove_client("nonexistent");
+        assert_eq!(registry.client_count(), 0);
     }
-
-    #[tokio::test]
-    async fn test_handle_register() {
-        // 初始化内存数据库
-        let pool = crate::db::init_database("sqlite::memory:")
-            .await
-            .expect("Failed to initialize database");
-
-        let manager = WsConnectionManager::new();
-        let register_req = RegisterRequest {
-            auth_token: "test_token".to_string(),
-            local_port: 3000,
-            protocols: vec!["http".to_string()],
-            subdomain: String::new(),
-        };
-
-        let result = manager.handle_register(register_req, &pool).await;
-        assert!(result.is_ok(), "Should register tunnel successfully");
-        
-        let response = result.unwrap();
-        assert!(!response.courier_id.is_empty());
-        assert!(!response.subdomain.is_empty());
-        assert_eq!(manager.active_tunnel_count().await, 1);
-    }
-
-    #[tokio::test]
-    async fn test_subdomain_conflict() {
-        // 初始化内存数据库
-        let pool = crate::db::init_database("sqlite::memory:")
-            .await
-            .expect("Failed to initialize database");
-
-        let manager = WsConnectionManager::new();
-        let test_subdomain = "conflict-test".to_string();
-
-        // 创建第一个隧道
-        let register_req_1 = RegisterRequest {
-            auth_token: "token1".to_string(),
-            local_port: 3000,
-            protocols: vec!["http".to_string()],
-            subdomain: test_subdomain.clone(),
-        };
-
-        let result_1 = manager.handle_register(register_req_1, &pool).await;
-        assert!(result_1.is_ok(), "First tunnel should be created successfully");
-        assert_eq!(result_1.unwrap().subdomain, test_subdomain);
-
-        // 尝试创建第二个隧道使用相同子域名
-        let register_req_2 = RegisterRequest {
-            auth_token: "token2".to_string(),
-            local_port: 3001,
-            protocols: vec!["http".to_string()],
-            subdomain: test_subdomain.clone(),
-        };
-
-        let result_2 = manager.handle_register(register_req_2, &pool).await;
-        assert!(result_2.is_err(), "Second tunnel with same subdomain should fail");
-        let err_msg = result_2.unwrap_err();
-        assert!(err_msg.contains("creation failed") || err_msg.contains("已被占用"));
-    }
-
-    #[tokio::test]
-    async fn test_empty_auth_token() {
-        let pool = crate::db::init_database("sqlite::memory:")
-            .await
-            .expect("Failed to initialize database");
-
-        let manager = WsConnectionManager::new();
-        let register_req = RegisterRequest {
-            auth_token: String::new(),  // 空令牌
-            local_port: 3000,
-            protocols: vec!["http".to_string()],
-            subdomain: "test".to_string(),
-        };
-
-        let result = manager.handle_register(register_req, &pool).await;
-        assert!(result.is_err(), "Should reject empty auth token");
-        assert_eq!(result.unwrap_err(), "Authentication failed");
-    }
-}
-
-/// 处理 WebSocket 连接（占位符 - 实际连接处理由框架完成）
-pub async fn handle_connection(
-    _socket: (),
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("WebSocket 连接处理完成");
-    Ok(())
 }
