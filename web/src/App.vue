@@ -216,7 +216,6 @@ const fetchTunnels = async () => {
     activeTunnels.value = response.total
     addLog('INFO', `成功加载 ${response.total} 个隧道`)
   } catch (error) {
-    console.error('获取隧道列表失败:', error)
     errorMessage.value = '获取隧道列表失败：' + String(error)
     addLog('ERROR', '获取隧道列表失败：' + String(error))
   } finally {
@@ -254,7 +253,6 @@ const createTunnel = async () => {
     // 刷新列表
     await fetchTunnels()
   } catch (error) {
-    console.error('创建隧道失败:', error)
     errorMessage.value = '创建隧道失败：' + String(error)
     addLog('ERROR', '创建隧道失败：' + String(error))
   } finally {
@@ -272,7 +270,6 @@ const deleteTunnel = async (tunnelId: string) => {
     addLog('INFO', `隧道已删除：${tunnelId}`)
     await fetchTunnels()
   } catch (error) {
-    console.error('删除隧道失败:', error)
     errorMessage.value = '删除隧道失败：' + String(error)
     addLog('ERROR', '删除隧道失败：' + String(error))
   }
