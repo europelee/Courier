@@ -54,115 +54,68 @@ impl LocalProxy {
         }
     }
 
+    /// 从客户端读取一次请求数据，EOF 返回 None
+    async fn read_request(client: &mut TcpStream, read_timeout: Duration) -> Result<Option<Vec<u8>>> {
+        let mut buffer = vec![0u8; 65536];
+        match timeout(read_timeout, client.read(&mut buffer)).await {
+            Ok(Ok(0)) => Ok(None),
+            Ok(Ok(n)) => Ok(Some(buffer[..n].to_vec())),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(anyhow::anyhow!("Client read timeout")),
+        }
+    }
+
+    /// 连接服务器，转发请求，返回响应数据
+    async fn forward_to_server(server_addr: &str, data: &[u8], write_timeout: Duration, read_timeout: Duration) -> Result<Vec<u8>> {
+        let mut server = TcpStream::connect(server_addr).await?;
+
+        match timeout(write_timeout, server.write_all(data)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => return Err(anyhow::anyhow!("Server write timeout")),
+        }
+
+        let mut response_buffer = vec![0u8; 65536];
+        match timeout(read_timeout, server.read(&mut response_buffer)).await {
+            Ok(Ok(0)) => Err(anyhow::anyhow!("Server closed connection")),
+            Ok(Ok(m)) => Ok(response_buffer[..m].to_vec()),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(anyhow::anyhow!("Server read timeout")),
+        }
+    }
+
+    /// 将响应数据写回客户端
+    async fn send_response(client: &mut TcpStream, data: &[u8], write_timeout: Duration) -> Result<()> {
+        match timeout(write_timeout, client.write_all(data)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => Err(anyhow::anyhow!("Client write timeout")),
+        }
+    }
+
     /// 处理单个客户端连接（支持持久连接 + 超时控制）
-    /// 
-    /// Task 1 优化：使用 64KB 缓冲区以支持大文件传输
-    /// Task 2 优化：支持持久连接（多个请求-响应循环）
-    /// Task 3 优化：实现超时控制（30 秒读/写超时）
-    /// 
-    /// 实现方式：
-    /// - 之前：无限期等待，可能导致资源泄漏
-    /// - 现在：所有读/写操作使用 30 秒超时，防止慢速客户端
-    /// - 效果：资源得到保护，服务器更稳定
     async fn handle_client(mut client: TcpStream, server_addr: String) -> Result<()> {
         let read_timeout = Duration::from_secs(30);
         let write_timeout = Duration::from_secs(30);
-        
-        // 循环处理多个请求，实现持久连接
+
         loop {
-            // 读取客户端请求（带 30 秒超时）
-            let mut buffer = vec![0u8; 65536];  // 64KB 动态缓冲
-            
-            match timeout(read_timeout, client.read(&mut buffer)).await {
-                Ok(Ok(n)) if n > 0 => {
-                    // 成功读取数据
-                    let request = String::from_utf8_lossy(&buffer[..n]);
-                    info!("Client request received ({} bytes)\n{}", n, request);
-                    
-                    // 连接到服务器
-                    let mut server = match TcpStream::connect(&server_addr).await {
-                        Ok(s) => {
-                            info!("Connected to server: {}", server_addr);
-                            s
-                        },
-                        Err(e) => {
-                            error!("Failed to connect to server: {}", e);
-                            return Err(e.into());
-                        }
-                    };
-
-                    // 发送请求到服务器（带 30 秒超时）
-                    match timeout(write_timeout, server.write_all(&buffer[..n])).await {
-                        Ok(Ok(())) => {
-                            info!("Request forwarded to server ({} bytes)", n);
-                        },
-                        Ok(Err(e)) => {
-                            error!("Server write error: {}", e);
-                            return Err(e.into());
-                        },
-                        Err(_) => {
-                            warn!("Server write timeout (30s exceeded)");
-                            return Err(anyhow::anyhow!("Server write timeout"));
-                        }
-                    }
-
-                    // 接收服务器响应（带 30 秒超时）
-                    let mut response_buffer = vec![0u8; 65536];  // 64KB 动态缓冲
-                    
-                    match timeout(read_timeout, server.read(&mut response_buffer)).await {
-                        Ok(Ok(m)) if m > 0 => {
-                            info!("Server response received ({} bytes)", m);
-                            
-                            // 发送响应给客户端（带 30 秒超时）
-                            match timeout(write_timeout, client.write_all(&response_buffer[..m])).await {
-                                Ok(Ok(())) => {
-                                    info!("Response sent to client ({} bytes)", m);
-                                },
-                                Ok(Err(e)) => {
-                                    error!("Client write error: {}", e);
-                                    return Err(e.into());
-                                },
-                                Err(_) => {
-                                    warn!("Client write timeout (30s exceeded)");
-                                    return Err(anyhow::anyhow!("Client write timeout"));
-                                }
-                            }
-                        },
-                        Ok(Ok(_)) => {
-                            // 服务器关闭连接
-                            warn!("Server connection closed (EOF)");
-                            return Ok(());
-                        },
-                        Ok(Err(e)) => {
-                            error!("Server read error: {}", e);
-                            return Err(e.into());
-                        },
-                        Err(_) => {
-                            warn!("Server read timeout (30s exceeded)");
-                            return Err(anyhow::anyhow!("Server read timeout"));
-                        }
-                    }
-                },
-                Ok(Ok(_)) => {
-                    // EOF: 客户端正常关闭连接
+            match Self::read_request(&mut client, read_timeout).await {
+                Ok(None) => {
                     info!("Client connection closed normally (EOF)");
                     return Ok(());
-                },
-                Ok(Err(e)) => {
-                    // I/O 错误
+                }
+                Ok(Some(data)) => {
+                    info!("Client request received ({} bytes)", data.len());
+                    let response = Self::forward_to_server(&server_addr, &data, write_timeout, read_timeout).await?;
+                    info!("Server response received ({} bytes)", response.len());
+                    Self::send_response(&mut client, &response, write_timeout).await?;
+                    info!("Response sent to client ({} bytes)", response.len());
+                }
+                Err(e) => {
                     error!("Client read error: {}", e);
-                    return Err(e.into());
-                },
-                Err(_) => {
-                    // 读超时
-                    warn!("Client read timeout (30s exceeded)");
-                    return Err(anyhow::anyhow!("Client read timeout"));
+                    return Err(e);
                 }
             }
-
-            // 循环继续，处理下一个请求
-            // 连接保持活跃，支持持久连接（HTTP keep-alive）
-            // 所有读/写操作都受到 30 秒超时保护
         }
     }
 }
@@ -170,6 +123,7 @@ impl LocalProxy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener as TokioListener;
 
     #[test]
     fn test_local_proxy_creation() {
@@ -308,20 +262,73 @@ mod tests {
         // 这保证了资源不会被无限期占用
     }
 
+    /// 测试 read_request: EOF 返回 None
+    #[tokio::test]
+    async fn test_read_request_eof() {
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            drop(sock); // 立即关闭，产生 EOF
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let result = LocalProxy::read_request(&mut client, Duration::from_secs(5)).await.unwrap();
+        assert!(result.is_none(), "EOF 应返回 None");
+    }
+
+    /// 测试 read_request: 正常读取返回 Some(data)
+    #[tokio::test]
+    async fn test_read_request_data() {
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            sock.write_all(b"GET / HTTP/1.1\r\n").await.unwrap();
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let result = LocalProxy::read_request(&mut client, Duration::from_secs(5)).await.unwrap();
+        assert!(result.is_some(), "有数据时应返回 Some");
+        assert_eq!(result.unwrap(), b"GET / HTTP/1.1\r\n");
+    }
+
+    /// 测试 send_response: 正常写入
+    #[tokio::test]
+    async fn test_send_response_ok() {
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 32];
+            let n = sock.read(&mut buf).await.unwrap();
+            buf[..n].to_vec()
+        });
+
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        LocalProxy::send_response(&mut client, b"HTTP/1.1 200 OK", Duration::from_secs(5))
+            .await
+            .unwrap();
+        drop(client);
+
+        let received = handle.await.unwrap();
+        assert_eq!(received, b"HTTP/1.1 200 OK");
+    }
+
     /// 测试超时和持久连接的兼容性
     #[test]
     fn test_timeout_with_persistent_connection() {
         // 验证超时不会破坏持久连接的多请求处理能力
         // 场景：快速的连续请求（都在 30 秒内）应该全部处理成功
-        
-        let request_interval_ms = 1_000;  // 每个请求间隔 1 秒
+
+        let request_interval_ms = 1_000;
         let num_requests = 5;
         let total_time_ms = request_interval_ms * num_requests;
-        let timeout_ms = 30_000;  // 30 秒超时
-        
-        // 5 个请求总时间（5 秒）< 超时时间（30 秒）
+        let timeout_ms = 30_000;
+
         assert!(total_time_ms < timeout_ms, "快速连续请求应该不会超时");
-        
-        // 这验证了超时不会影响正常的持久连接操作
     }
 }
