@@ -210,6 +210,44 @@ impl WsMessage {
     }
 }
 
+/// 前端订阅请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscribeRequest {}
+
+/// 隧道上线事件（服务端 → 前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelConnectedEvent {
+    pub courier_id: String,
+    pub subdomain: String,
+    pub public_url: String,
+    pub local_port: u16,
+}
+
+/// 隧道下线事件（服务端 → 前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelDisconnectedEvent {
+    pub courier_id: String,
+}
+
+/// 单条隧道流量统计
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelStats {
+    pub courier_id: String,
+    pub bytes_transferred: u64,
+}
+
+/// 流量统计广播事件（服务端 → 前端，每 10 秒）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatsUpdateEvent {
+    pub tunnels: Vec<TunnelStats>,
+}
+
+/// 心跳确认响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatAck {
+    pub status: String,
+}
+
 /// ============================================================================
 /// 常量定义
 /// ============================================================================
@@ -335,5 +373,27 @@ mod tests {
     fn test_error_code_display() {
         assert_eq!(ErrorCode::InvalidAuth.to_string(), "4001");
         assert_eq!(ErrorCode::DatabaseError.to_string(), "5001");
+    }
+
+    #[test]
+    fn test_new_message_types_serialize() {
+        let evt = TunnelConnectedEvent {
+            courier_id: "tun_ABC".to_string(),
+            subdomain: "abc".to_string(),
+            public_url: "https://abc.example.com".to_string(),
+            local_port: 3000,
+        };
+        let json = serde_json::to_string(&evt).unwrap();
+        assert!(json.contains("tun_ABC"));
+
+        let disc = TunnelDisconnectedEvent { courier_id: "tun_ABC".to_string() };
+        let json2 = serde_json::to_string(&disc).unwrap();
+        assert!(json2.contains("tun_ABC"));
+
+        let stats = StatsUpdateEvent {
+            tunnels: vec![TunnelStats { courier_id: "tun_ABC".to_string(), bytes_transferred: 1024 }],
+        };
+        let json3 = serde_json::to_string(&stats).unwrap();
+        assert!(json3.contains("1024"));
     }
 }
