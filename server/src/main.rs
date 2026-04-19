@@ -314,10 +314,14 @@ async fn handle_client_connection(
             Ok(Message::Text(text)) => {
                 if let Ok(m) = serde_json::from_str::<WsMessage>(&text) {
                     if m.msg_type == "heartbeat" {
-                        let ack_text = serde_json::to_string(&WsMessage::new(
-                            "heartbeat_ack",
-                            serde_json::to_value(HeartbeatAck { status: "ok".to_string() }).unwrap_or_default(),
-                        )).unwrap_or_default();
+                        let ack_value = match serde_json::to_value(HeartbeatAck { status: "ok".to_string() }) {
+                            Ok(v) => v,
+                            Err(e) => { error!("Failed to serialize HeartbeatAck: {}", e); continue; }
+                        };
+                        let ack_text = match serde_json::to_string(&WsMessage::new("heartbeat_ack", ack_value)) {
+                            Ok(t) => t,
+                            Err(e) => { error!("Failed to serialize heartbeat_ack message: {}", e); continue; }
+                        };
                         let mut reg = state.tunnel_registry.lock().await;
                         if let Some(s) = reg.clients.get_mut(&courier_id) {
                             let _ = s.sender.send(Message::Text(ack_text)).await;
