@@ -377,8 +377,8 @@ pub async fn health_check(State(_state): State<AppState>) -> impl IntoResponse {
     let response = HealthCheckResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        active_tunnels: 0,  // TODO: 从数据库查询
-        uptime: 0,          // TODO: 计算运行时间
+        active_tunnels: 0,
+        uptime: 0,
     };
     Json(response)
 }
