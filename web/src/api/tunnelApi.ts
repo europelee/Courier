@@ -124,3 +124,83 @@ export const checkHealth = async (): Promise<{ status: string }> => {
     throw error;
   }
 };
+
+// ===== WebSocket 实时订阅 =====
+
+export interface TunnelConnectedEvent {
+  courier_id: string
+  subdomain: string
+  public_url: string
+  local_port: number
+}
+
+export interface TunnelDisconnectedEvent {
+  courier_id: string
+}
+
+export interface TunnelStatsItem {
+  courier_id: string
+  bytes_transferred: number
+}
+
+export interface StatsUpdateEvent {
+  tunnels: TunnelStatsItem[]
+}
+
+export type WsEventHandler = {
+  onConnected: (evt: TunnelConnectedEvent) => void
+  onDisconnected: (evt: TunnelDisconnectedEvent) => void
+  onStatsUpdate: (evt: StatsUpdateEvent) => void
+  onSnapshot: (evt: TunnelConnectedEvent) => void
+}
+
+let ws: WebSocket | null = null
+let reconnectDelay = 1000
+
+export function connectWebSocket(handlers: WsEventHandler): void {
+  if (ws && ws.readyState === WebSocket.OPEN) return
+
+  ws = new WebSocket('ws://localhost:8080/ws')
+
+  ws.onopen = () => {
+    reconnectDelay = 1000
+    ws!.send(JSON.stringify({ msg_type: 'subscribe', data: {} }))
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data as string) as { msg_type: string; data: unknown }
+      switch (msg.msg_type) {
+        case 'tunnel_connected':
+          handlers.onConnected(msg.data as TunnelConnectedEvent)
+          break
+        case 'tunnel_disconnected':
+          handlers.onDisconnected(msg.data as TunnelDisconnectedEvent)
+          break
+        case 'stats_update':
+          handlers.onStatsUpdate(msg.data as StatsUpdateEvent)
+          break
+      }
+    } catch {
+      // 忽略无法解析的消息
+    }
+  }
+
+  ws.onclose = () => {
+    ws = null
+    setTimeout(() => connectWebSocket(handlers), reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+  }
+
+  ws.onerror = () => {
+    ws?.close()
+  }
+}
+
+export function disconnectWebSocket(): void {
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
+  }
+}
