@@ -157,7 +157,8 @@ pub async fn login(
         crate::errors::ApiError::ValidationError("password 字段必填".to_string())
     })?;
 
-    let admin_password = state.config.admin_password.as_deref().unwrap_or("");
+    let admin_password = state.config.admin_password.as_deref()
+        .ok_or_else(|| crate::errors::ApiError::InternalError("服务未配置管理员密码".to_string()))?;
 
     if !crate::auth::verify_password(&password, admin_password) {
         return Err(crate::errors::ApiError::Unauthorized("密码错误".to_string()));
@@ -169,12 +170,3 @@ pub async fn login(
     Ok(Json(LoginResponse { token, expires_in: 86400 }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_handler_validation() {
-        // 基础的处理器逻辑测试将在集成测试中进行
-    }
-}

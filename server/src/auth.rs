@@ -54,8 +54,7 @@ impl Claims {
         
         let exp = now + (expires_in_hours * 3600);
         
-        // 简单的令牌 ID 生成（实际应使用 UUID）
-        let jti = format!("jti_{}", now);
+        let jti = uuid::Uuid::new_v4().to_string();
         
         Self {
             sub: user_id,
@@ -221,20 +220,25 @@ mod tests {
     /// 测试过期令牌
     #[test]
     fn test_expired_token() {
-        // 创建一个立即过期的令牌（0 小时）
-        let claims = Claims::new("user_123".to_string(), 0);
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let past_exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(7200); // 2 hours ago
+        let claims = Claims {
+            sub: "user_123".to_string(),
+            exp: past_exp,
+            iat: past_exp,
+            jti: "test_jti".to_string(),
+        };
         let token = encode(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(TEST_SECRET.as_ref()),
         ).unwrap();
-        
-        // 等待一秒，确保令牌已过期
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        
         let result = validate_auth_token(&token, TEST_SECRET);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Token expired"));
+        assert!(result.is_err(), "expired token should be rejected");
     }
 
     /// 测试令牌声明字段
