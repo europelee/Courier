@@ -23,6 +23,7 @@ use axum::{
 use clap::Parser;
 use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use courier_shared::HealthCheckResponse;
 use futures_util::stream::StreamExt;
@@ -69,9 +70,12 @@ struct Args {
 struct AppState {
     /// SQLite连接池
     db: SqlitePool,
-    
+
     /// 服务器配置
     config: Arc<ServerConfig>,
+
+    /// 隧道注册表
+    tunnel_registry: Arc<Mutex<websocket::TunnelRegistry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +112,18 @@ async fn main() -> anyhow::Result<()> {
     let db = db::init_database(&args.database).await?;
     info!("数据库初始化完成");
 
+    // 创建 TunnelRegistry 并启动 stats 定时广播
+    let tunnel_registry = Arc::new(Mutex::new(websocket::TunnelRegistry::new()));
+
+    let registry_for_stats = tunnel_registry.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            registry_for_stats.lock().await.broadcast_stats().await;
+        }
+    });
+
     // 创建应用状态
     let state = AppState {
         db,
@@ -115,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
             server_domain: args.server_domain.clone(),
             admin_password: args.admin_password,
         }),
+        tunnel_registry,
     };
 
     // 构建路由
@@ -404,5 +421,17 @@ mod tests {
             admin_password: Some("password".to_string()),
         };
         assert_eq!(config.server_domain, "example.com");
+    }
+
+    #[test]
+    fn test_appstate_has_tunnel_registry() {
+        let _: fn() -> () = || {
+            let _field_exists: std::sync::Arc<tokio::sync::Mutex<crate::websocket::TunnelRegistry>>;
+        };
+        // Verify the field exists on AppState by accessing it
+        // This is a compile-time check - if AppState doesn't have tunnel_registry, this won't compile
+        fn _check_field(state: &AppState) {
+            let _: &std::sync::Arc<tokio::sync::Mutex<crate::websocket::TunnelRegistry>> = &state.tunnel_registry;
+        }
     }
 }
