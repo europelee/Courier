@@ -327,6 +327,38 @@ pub async fn create_tunnel_with_unique_subdomain(
     Ok(())
 }
 
+/// 通过隧道 ID 查询隧道信息，返回 Option（不存在时返回 None）
+pub async fn get_tunnel_by_id(pool: &SqlitePool, courier_id: &str) -> Result<Option<Tunnel>, CourierError> {
+    let row = sqlx::query_as::<_, (String, String, String, i32, String, i64, i64)>(
+        r#"
+        SELECT id, subdomain, auth_token, local_port, status, created_at, bytes_transferred
+        FROM tunnels
+        WHERE id = ?
+        "#,
+    )
+    .bind(courier_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| CourierError::DatabaseError(e.to_string()))?;
+
+    Ok(row.map(|(id, subdomain, auth_token, local_port, status, created_at, bytes_transferred)| {
+        let created_at_iso = chrono::DateTime::<Utc>::from_timestamp(created_at, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
+
+        Tunnel {
+            id,
+            subdomain,
+            auth_token,
+            local_port: local_port as u16,
+            status,
+            created_at_iso,
+            bytes_transferred: bytes_transferred as u64,
+            user_id: None,
+        }
+    }))
+}
+
 /// 删除隧道
 pub async fn delete_tunnel(pool: &SqlitePool, courier_id: &str) -> Result<(), CourierError> {
     sqlx::query("DELETE FROM tunnels WHERE id = ?")
@@ -401,6 +433,16 @@ mod tests {
 
         // 应该失败（但实际上SQLite会返回unique constraint错误）
         assert!(result.is_err(), "Should not allow duplicate subdomain");
+    }
+
+    #[tokio::test]
+    async fn test_update_tunnel_status() {
+        let pool = init_database("sqlite::memory:").await.unwrap();
+        create_tunnel_with_unique_subdomain(&pool, "tun_TEST", "testsub", "token", 3000)
+            .await.unwrap();
+        update_tunnel_status(&pool, "tun_TEST", "disconnected").await.unwrap();
+        let tunnel = get_tunnel_by_id(&pool, "tun_TEST").await.unwrap().unwrap();
+        assert_eq!(tunnel.status, "disconnected");
     }
 }
 
