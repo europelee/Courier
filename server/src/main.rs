@@ -98,6 +98,13 @@ async fn main() -> anyhow::Result<()> {
 
     // 解析命令行参数
     let args = Args::parse();
+    let admin_password = match require_admin_password(args.admin_password) {
+        Ok(p) => p,
+        Err(msg) => {
+            error!("{}", msg);
+            std::process::exit(1);
+        }
+    };
     info!("启动隧道穿透服务器");
     info!("配置: HTTP 端口={}, 域名={}", args.port, args.server_domain);
     
@@ -129,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         config: Arc::new(ServerConfig {
             server_domain: args.server_domain.clone(),
-            admin_password: args.admin_password,
+            admin_password: Some(admin_password),
         }),
         tunnel_registry,
     };
@@ -491,6 +498,10 @@ async fn proxy_handler(
     }
 }
 
+pub fn require_admin_password(password: Option<String>) -> Result<String, String> {
+    password.ok_or_else(|| "必须通过 --admin-password 设置管理员密码".to_string())
+}
+
 /// ============================================================================
 /// 模块定义
 /// ============================================================================
@@ -498,6 +509,12 @@ async fn proxy_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_admin_password_required() {
+        assert!(require_admin_password(None).is_err());
+        assert!(require_admin_password(Some("secret".to_string())).is_ok());
+    }
 
     #[test]
     fn test_app_state_creation() {
