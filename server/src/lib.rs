@@ -16,7 +16,7 @@ use axum::{
 use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use courier_shared::HealthCheckResponse;
 use futures_util::stream::StreamExt;
 use futures_util::sink::SinkExt;
@@ -118,8 +118,20 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 .get("token")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let secret = state.config.admin_password.as_deref().unwrap_or("");
+            let secret = match state.config.admin_password.as_deref() {
+                Some(s) => s,
+                None => {
+                    if let Ok(mut ws) = sender.reunite(receiver) {
+                        let _ = ws.close().await;
+                    }
+                    return;
+                }
+            };
             if auth::validate_auth_token(token, secret).is_err() {
+                warn!("WebSocket subscribe rejected: invalid or missing token");
+                if let Ok(mut ws) = sender.reunite(receiver) {
+                    let _ = ws.close().await;
+                }
                 return;
             }
             handle_subscriber_connection(sender, receiver, state).await

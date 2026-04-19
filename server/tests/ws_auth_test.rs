@@ -15,7 +15,7 @@ async fn test_health_no_token_still_200() {
 }
 
 #[test]
-fn test_subscribe_token_validation_rejects_missing_token() {
+fn test_validate_auth_token_rejects_empty_string() {
     // When no token is provided (empty string simulates missing token from ws_msg.data),
     // validate_auth_token should return Err, causing connection to be rejected
     let result = courier_server::auth::validate_auth_token("", "test_secret");
