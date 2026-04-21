@@ -1,0 +1,1577 @@
+# OpenSpec vs Superpowers：区别、联系与融合分析
+
+> 基于 OpenSpec v1.3.0 源码（`schema.yaml` + workflow templates）和 Superpowers v5.0.2 源码（SKILL.md 文件）的真实逻辑分析。
+
+## 目录
+
+- [一、核心定位对比](#一核心定位对比)
+- [二、产出物（Artifacts）详细对比](#二产出物artifacts详细对比)
+  - [1. 完整产出物清单](#1-完整产出物清单)
+  - [2. 关键产出物结构对比](#2-关键产出物结构对比)
+  - [3. 设计文档的重叠与差异](#3-设计文档的重叠与差异)
+  - [4. 任务拆解的重叠与差异](#4-任务拆解的重叠与差异)
+- [三、流程时序与产出物全景图](#三流程时序与产出物全景图)
+  - [1. OpenSpec 完整时序](#1-openspec-完整时序)
+  - [2. Superpowers 完整时序](#2-superpowers-完整时序)
+  - [3. 双框架并排时间线对比](#3-双框架并排时间线对比)
+  - [4. 关键时序差异总结](#4-关键时序差异总结)
+- [四、其他核心区别](#四其他核心区别)
+  - [1. 关注层次不同](#1-关注层次不同)
+  - [2. 产出物生命周期不同](#2-产出物生命周期不同)
+  - [3. 铁律（Iron Laws）不同](#3-铁律iron-laws不同)
+  - [4. 流程刚性不同](#4-流程刚性不同)
+  - [5. 审查机制不同](#5-审查机制不同)
+- [五、联系与互补](#五联系与互补)
+- [六、融合可行性分析](#六融合可行性分析)
+  - [融合工作流](#融合工作流)
+  - [融合的优势](#融合的优势)
+  - [融合的风险](#融合的风险)
+  - [实际建议](#实际建议)
+- [七、Skill 改造方案：brainstorming → OpenSpec → writing-plans 链路](#七skill-改造方案brainstorming--openspec--writing-plans-链路)
+  - [1. 改造目标](#1-改造目标)
+  - [2. Superpowers spec-document-reviewer 详解](#2-superpowers-spec-document-reviewer-详解)
+  - [3. 修改 brainstorming/SKILL.md](#3-修改-brainstormingskillmd)
+  - [4. 修改 writing-plans/SKILL.md](#4-修改-writing-plansskillmd)
+  - [5. 修改 subagent-driven-development/SKILL.md](#5-修改-subagent-driven-developmentskillmd)
+  - [6. 完整改造后的链路（含双路径）](#6-完整改造后的链路含双路径)
+  - [7. 流程路由规则](#7-流程路由规则)
+  - [8. 改造量与风险评估](#8-改造量与风险评估)
+  - [9. 改造带来的核心收益](#9-改造带来的核心收益)
+- [八、总结](#八总结)
+- [参考资料](#参考资料)
+
+## 一、核心定位对比
+
+| 维度 | **OpenSpec** | **Superpowers** |
+|------|-------------|-----------------|
+| **哲学** | Spec-Driven Development（规范驱动）：fluid not rigid, iterative not waterfall | Process-Driven Development（流程驱动）：TDD, systematic over ad-hoc |
+| **核心资产** | **规范文档**是 source of truth（specs/ 是活文档） | **流程纪律**是 source of truth（Iron Laws 不可违背） |
+| **关注点** | **写什么**（What to build）+ **为什么**（Why） | **怎么做**（How to build）+ **质量保障** |
+| **主线流程** | Propose → Apply → Archive（artifact DAG 驱动） | Brainstorm → Plan → Execute → Finish（skill 链式调用） |
+| **文件体系** | `openspec/specs/`, `openspec/changes/`, `changes/archive/` | `docs/superpowers/specs/`, `docs/superpowers/plans/` + Git worktree |
+| **适用场景** | 新特性、跨团队协作、需要长期规范沉淀的变更 | 任何开发任务（feature、bugfix、refactor） |
+| **版本** | v1.3.0（@fission-ai/openspec CLI） | v5.0.2（Claude Code 插件） |
+
+## 二、产出物（Artifacts）详细对比
+
+### 1. 完整产出物清单
+
+#### OpenSpec 产出物
+
+| 阶段 | 产出文件 | 路径 | 内容 |
+|------|---------|------|------|
+| **Init** | `AGENTS.md` | `openspec/` | AI 工作指令 |
+| **Init** | `project.md` | `openspec/` | 项目上下文、技术栈 |
+| **Propose** | `proposal.md` | `openspec/changes/{name}/` | Why / What Changes / Capabilities / Impact |
+| **Propose** | `specs/<cap>/spec.md` | `openspec/changes/{name}/specs/` | ADDED/MODIFIED/REMOVED/RENAMED Requirements + Scenarios |
+| **Propose** | `design.md`（可选） | `openspec/changes/{name}/` | Context / Goals-NonGoals / Decisions / Risks-Tradeoffs |
+| **Propose** | `tasks.md` | `openspec/changes/{name}/` | 编号分组 checkbox 任务清单 |
+| **Apply** | 更新 `tasks.md` | 原位 | `- [ ]` → `- [x]` |
+| **Archive** | `<capability>/spec.md` | `openspec/specs/` | 智能合并后的 source-of-truth 规范 |
+| **Archive** | 整个 `changes/{name}/` | → `openspec/changes/archive/YYYY-MM-DD-{name}/` | 归档历史记录 |
+
+#### Superpowers 产出物
+
+| 阶段 | 产出文件 | 路径 | 内容 |
+|------|---------|------|------|
+| **Brainstorming** | **设计规范文档** | `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` | 架构、组件、数据流、错误处理、测试方案 |
+| **Brainstorming** | Spec Review 报告 | （内存，不落盘） | 审查状态 + 问题清单 |
+| **Brainstorming** | 可视化 Mockup（可选） | `.superpowers/brainstorm/<session>/` | HTML 原型 + 用户交互事件 |
+| **Writing Plans** | **实现计划文档** | `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` | Chunk → Task → Step，含精确文件路径和 TDD 步骤 |
+| **Writing Plans** | Plan Review 报告 | （内存，不落盘） | 审查状态 + 问题清单 |
+| **Executing** | TodoWrite 任务 | （内存） | 执行进度追踪 |
+| **Executing** | Git commits | Git 历史 | 按 step 提交 |
+| **Subagent** | Implementer 报告 | （内存） | DONE / BLOCKED / NEEDS_CONTEXT 状态 |
+| **Subagent** | Spec Compliance 报告 | （内存） | 规范符合度审查 |
+| **Subagent** | Code Quality 报告 | （内存） | 代码质量审查 |
+
+### 2. 关键产出物结构对比
+
+#### OpenSpec `proposal.md` 结构（源码：`templates/proposal.md`）
+
+```markdown
+## Why                       ← 1-2 句话说明动机（为什么做？为什么是现在？）
+## What Changes              ← 变更内容清单，标记 **BREAKING**
+## Capabilities              ← 关键桥梁：连接 proposal 和 specs 阶段
+  ### New Capabilities       ← 每项 → 新建 specs/<name>/spec.md
+  ### Modified Capabilities  ← 每项 → delta spec（需检查 openspec/specs/）
+## Impact                    ← 受影响的代码、API、依赖、系统
+```
+★ 关注 WHY，不涉及 HOW。Capabilities 章节创建了 proposal→specs 的契约。
+
+#### OpenSpec `specs/<capability>/spec.md` 结构（源码：`templates/spec.md`）
+
+```markdown
+## ADDED Requirements
+### Requirement: <name>
+<描述，使用 SHALL/MUST 规范语言>
+#### Scenario: <name>        ← 必须用 4 个 # 号
+- **WHEN** <condition>
+- **THEN** <expected outcome>
+
+## MODIFIED Requirements     ← 必须包含完整更新内容（非部分）
+## REMOVED Requirements      ← 必须含 **Reason** + **Migration**
+## RENAMED Requirements      ← FROM:/TO: 格式
+```
+★ 每个 Requirement 必须有 ≥1 Scenario。Scenario = 潜在测试用例。
+
+#### OpenSpec `design.md` 结构（源码：`templates/design.md`）
+
+```markdown
+## Context                   ← 背景、现状、约束、利益相关者
+## Goals / Non-Goals         ← 明确做什么和不做什么
+## Decisions                 ← 技术选择 + 替代方案（Why X over Y?）
+## Risks / Trade-offs        ← [Risk] → Mitigation 格式
+## Migration Plan            ← 部署步骤、回滚策略（如适用）
+## Open Questions            ← 待解决的决策或未知项
+```
+★ 仅在跨模块/新依赖/安全性能/数据模型变更时创建。关注架构，不关注逐行实现。
+
+#### OpenSpec `tasks.md` 结构（源码：`templates/tasks.md`）
+
+```markdown
+## 1. <Task Group Name>
+- [ ] 1.1 <task description>
+- [ ] 1.2 <task description>
+
+## 2. <Task Group Name>
+- [ ] 2.1 <task description>
+- [ ] 2.2 <task description>
+```
+★ 简洁的编号分组 + checkbox。无 Quality Gate、无 Phase 概念。
+★ 任务按依赖排序，每个任务可在一个 session 内完成。
+★ checkbox 格式是 apply 阶段解析进度的基础。
+
+#### Superpowers Plan 文档结构
+
+```markdown
+# {Feature} Implementation Plan
+**Goal:** | **Architecture:** | **Tech Stack:**
+
+## Chunk N: <name>           ← 每 chunk ≤1000 行
+### Task N: [Component]
+**Files:** Create/Modify/Test ← 精确到文件:行号
+- [ ] Step 1: Write failing test
+- [ ] Step 2: Run test (RED)
+- [ ] Step 3: Write implementation
+- [ ] Step 4: Run test (GREEN)
+- [ ] Step 5: Commit
+```
+
+### 3. 设计文档的重叠与差异
+
+这是两个框架**最大的重叠区域**：
+
+| 对比维度 | OpenSpec `proposal.md` + `design.md` | Superpowers `*-design.md` |
+|---------|--------------------------------------|--------------------------|
+| **触发时机** | `/opsx:propose` 阶段 | `brainstorming` 阶段 |
+| **关注重点** | 需求对齐——为什么做、做什么、影响什么 | 技术设计——怎么做、组件如何协作 |
+| **动机阐述** | 有（`## Why`——问题/机会） | 无显式动机章节（隐含在对话中） |
+| **变更清单** | 有（`## What Changes`，标记 BREAKING） | 无 |
+| **能力映射** | 有（`## Capabilities`：New + Modified，桥接到 specs） | 无 |
+| **影响分析** | 有（`## Impact`：受影响代码/API/依赖） | 无 |
+| **架构内容** | 有（`design.md` 的 Context/Decisions） | 有（Architecture + Components + Data Flow） |
+| **目标/非目标** | 有（`design.md` 的 Goals / Non-Goals） | 无显式 |
+| **技术决策** | 有（`design.md` 的 Decisions + 替代方案） | 隐含在架构章节 |
+| **风险分析** | 有（`design.md` 的 Risks / Trade-offs） | 无 |
+| **测试策略** | 无（在 specs 的 Scenario 中体现） | 有（Testing 章节） |
+| **持久性** | 永久保留，最终归档到 `archive/` | 留存在 `docs/superpowers/specs/` 但不参与后续管理 |
+| **审查机制** | 无内置审查（可选 `/opsx:verify`） | 有 spec-document-reviewer subagent 审查(≤5轮) |
+| **后续流转** | → `specs/**/*.md` → `tasks.md` → 代码 → `archive` | → Plan 文档 → TDD 执行 → Git commit |
+
+**核心差异**：
+- OpenSpec 将关注点分离为两个文件：`proposal.md`（Why/What）和 `design.md`（How/Decisions/Risks）
+- Superpowers 混合在单一 `*-design.md` 中（architecture/components/data flow/error handling/testing）
+- OpenSpec 的 `## Capabilities` 章节是桥梁——直接驱动 specs 阶段创建 delta spec 文件
+- Superpowers 的设计经过 subagent 审查 + 用户审阅双重门禁，OpenSpec 无强制审查
+
+### 4. 任务拆解的重叠与差异
+
+| 对比维度 | OpenSpec `tasks.md` | Superpowers Plan 文档 |
+|---------|--------------------|-----------------------|
+| **组织方式** | 按编号分组（`## 1. <Group>`），无预设层级模板 | 按 Chunk/Task/Step 三级嵌套 |
+| **粒度** | 粗粒度（一行描述一个任务） | 细粒度（精确到文件:行号 + 每步 TDD 操作） |
+| **质量门禁** | 无（简洁的 checkbox） | 每个 Step 内嵌 RED-GREEN 验证 |
+| **代码引导** | 不包含具体代码 | 包含完整代码片段 + 精确命令 + 预期输出 |
+| **执行方式** | AI 根据 contextFiles（proposal/specs/design）自行实现 | AI 严格按 Step 顺序执行 |
+| **进度追踪** | `- [ ]`/`- [x]` checkbox（apply 阶段解析） | TodoWrite 内存追踪 |
+
+---
+
+## 三、流程时序与产出物全景图
+
+> 以下内容基于 OpenSpec v1.3.0 源码（`schema.yaml` + workflow templates）和 Superpowers v5.0.2 源码（SKILL.md 文件）的真实逻辑。
+
+### 1. OpenSpec 完整时序
+
+OpenSpec 的核心工作流由 `schema.yaml` 定义了一个 **artifact 依赖图**（DAG）：
+
+```
+schema.yaml 定义的依赖关系：
+  proposal (无依赖)
+  specs    (依赖 proposal)
+  design   (依赖 proposal)
+  tasks    (依赖 specs + design)
+  apply    (依赖 tasks)
+```
+
+OpenSpec 提供两种 Propose 模式和多个辅助命令：
+
+```
+入口命令对比：
+──────────────────────────────────────────────────────────────────
+/opsx:new         逐步模式：创建 change 目录 → 展示第一个 artifact
+                  模板 → STOP 等待用户指示（每次只创建一个 artifact）
+/opsx:propose     一步到位：创建 change → 按依赖序自动生成所有 artifact
+/opsx:ff          等同 propose（快进模式）
+/opsx:continue    继续未完成 change：检测下一个 ready artifact → 创建它
+──────────────────────────────────────────────────────────────────
+```
+
+**完整流程（以 `/opsx:propose` 为主线）：**
+
+```
+Phase 1: PROPOSE
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+1.1 获取用户意图               AI↔用户  —
+    无输入? → AskUserQuestion
+    从描述推导 kebab-case name
+        │
+        ▼
+1.2 创建 change 目录           AI     openspec/changes/<name>/
+    openspec new change "<name>"        └─ .openspec.yaml
+        │
+        ▼
+1.3 获取 artifact 构建顺序     AI     —
+    openspec status --change
+    "<name>" --json
+    → 得到 applyRequires + artifacts
+        │
+        ▼
+   ┌ 按依赖序循环（ready 的先做）─────────────────────────┐
+   │                                                     │
+   │  1.4a 获取 artifact 指令                             │
+   │  openspec instructions <id>    AI     —              │
+   │  --change "<name>" --json                            │
+   │  → 得到 context, rules,                              │
+   │    template, instruction,                            │
+   │    outputPath, dependencies                          │
+   │      │                                               │
+   │      ▼                                               │
+   │  1.4b 读取已完成的依赖 artifact  AI     —              │
+   │      │                                               │
+   │      ▼                                               │
+   │  1.4c 按 template 结构创建文件   AI     (见下方产出)    │
+   │      │                                               │
+   │      ▼                                               │
+   │  1.4d 重新检查 status           AI     —              │
+   │  所有 applyRequires done? ─否─→ 下一个 ready artifact │
+   └──────────────────────────┬──────────────────────────┘
+                              │ 是
+                              ▼
+1.5 展示最终状态               AI     —
+    openspec status --change "<name>"
+
+产出 artifacts（按依赖序生成）：
+
+  ① proposal.md     changes/<name>/proposal.md
+                     ├─ ## Why（动机）
+                     ├─ ## What Changes（变更内容）
+                     ├─ ## Capabilities
+                     │  ├─ ### New Capabilities（新能力 → 创建 spec）
+                     │  └─ ### Modified Capabilities（修改的能力 → delta spec）
+                     └─ ## Impact（影响范围）
+                     ★ 注意：关注 WHY，不涉及 HOW
+
+  ② specs/**/*.md    changes/<name>/specs/<capability>/spec.md
+                     每个 Capability 一个 spec 文件
+                     ├─ ## ADDED Requirements
+                     │  └─ ### Requirement: <name>
+                     │     └─ #### Scenario: <name>
+                     │        ├─ WHEN <condition>
+                     │        └─ THEN <outcome>
+                     ├─ ## MODIFIED Requirements（必须包含完整内容）
+                     ├─ ## REMOVED Requirements（含 Reason + Migration）
+                     └─ ## RENAMED Requirements（FROM:/TO:）
+                     ★ 使用 SHALL/MUST 规范性语言
+                     ★ 每个 Requirement 必须有 ≥1 Scenario
+
+  ③ design.md        changes/<name>/design.md
+                     ├─ ## Context（背景/现状/约束）
+                     ├─ ## Goals / Non-Goals
+                     ├─ ## Decisions（技术决策 + 替代方案）
+                     ├─ ## Risks / Trade-offs
+                     └─ ## Open Questions
+                     ★ 仅在以下情况创建：跨模块/新依赖/安全性能/
+                       数据模型变更/有歧义需要技术决策
+                     ★ 关注架构和方法，不关注逐行实现
+
+  ④ tasks.md         changes/<name>/tasks.md
+                     ├─ ## 1. <Task Group>
+                     │  ├─ - [ ] 1.1 <task>
+                     │  └─ - [ ] 1.2 <task>
+                     └─ ## 2. <Task Group>
+                        ├─ - [ ] 2.1 <task>
+                        └─ - [ ] 2.2 <task>
+                     ★ 任务按依赖排序
+                     ★ 每个任务可在一个 session 内完成
+                     ★ checkbox 格式是 apply 阶段解析进度的基础
+```
+
+```
+Phase 2: APPLY (/opsx:apply)
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+2.1 选择 change                AI     —
+    (名称/上下文推断/列表选择)
+        │
+        ▼
+2.2 获取 status + schema 信息  AI     —
+    openspec status --change
+    "<name>" --json
+        │
+        ▼
+2.3 获取 apply 指令            AI     —
+    openspec instructions apply
+    --change "<name>" --json
+    → contextFiles, progress,
+      taskList, dynamicInstruction
+        │
+        ├── state: "blocked"   → 提示缺失 artifact
+        ├── state: "all_done"  → 恭喜完成，建议 archive
+        │
+        ▼
+2.4 读取所有 contextFiles      AI     —
+    (proposal/specs/design/tasks)
+        │
+        ▼
+2.5 显示进度                   AI     —
+    "N/M tasks complete"
+        │
+        ▼
+  ┌─▶ 2.6 实现 pending task    AI     源代码文件
+  │       │
+  │       ▼
+  │   2.7 标记 - [x] 完成      AI     tasks.md 更新
+  │       │
+  │       ├── 任务不清楚？ → 暂停，问用户
+  │       ├── 发现设计问题？ → 暂停，建议更新 artifact
+  │       ├── 遇到错误/阻塞？ → 暂停，等待指导
+  │       │
+  └───┤ 还有 pending task？──是──┘
+      │
+      否
+      │
+      ▼
+2.8 全部完成                   AI     —
+    建议 /opsx:archive
+
+★ 关键特性："fluid not rigid"
+  - 可随时调用（不必等所有 artifact 完成）
+  - 发现设计问题时建议更新 artifact（不锁定阶段）
+  - 保持变更最小化和聚焦
+```
+
+```
+[可选] VERIFY (/opsx:verify)
+══════════════════════════════════════════════════════════════════
+步骤                          产出物
+──────────────────────────────────────────────────────────────────
+V.1 加载所有 artifact          —
+V.2 验证 Completeness          CRITICAL: 未完成 task / 未实现 requirement
+V.3 验证 Correctness           WARNING: 实现偏离 spec / scenario 未覆盖
+V.4 验证 Coherence             SUGGESTION: 不符合 design 决策 / 模式不一致
+V.5 生成验证报告               Verification Report（三维度评分卡）
+```
+
+```
+Phase 3: ARCHIVE (/opsx:archive)
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+3.1 选择 change                用户    —
+    ★ 不自动选择，必须用户确认
+        │
+        ▼
+3.2 检查 artifact 完成状态     AI     —
+    openspec status --json
+    未完成？→ 警告 + 确认继续
+        │
+        ▼
+3.3 检查 task 完成状态         AI     —
+    解析 - [ ] vs - [x]
+    未完成？→ 警告 + 确认继续
+        │
+        ▼
+3.4 评估 delta spec 同步状态   AI     —
+    检查 changes/<name>/specs/
+    ├─ 有 delta + 需要同步 → "Sync now (recommended)"
+    │                        "Archive without syncing"
+    ├─ 已同步 → "Archive now"
+    └─ 无 delta spec → 直接归档
+        │
+        ▼ (如选择 sync)
+3.5 同步 delta 到主规范        AI     openspec/specs/<capability>/spec.md
+    (agent 驱动的智能合并)             ├─ ADDED → 新增 requirement
+    → 调用 openspec-sync-specs        ├─ MODIFIED → 部分更新（保留未提及内容）
+                                       ├─ REMOVED → 删除 requirement
+                                       └─ RENAMED → 重命名
+                                       ★ 智能合并：delta 代表意图，非全量替换
+                                       ★ 幂等操作：运行两次结果相同
+        │
+        ▼
+3.6 执行归档                   AI
+    mkdir -p openspec/changes/archive
+    mv changes/<name>                  → changes/archive/YYYY-MM-DD-<name>/
+        │
+        ▼
+3.7 显示摘要                   AI     —
+    change name / schema / archive 位置 / sync 状态
+```
+
+### 2. Superpowers 完整时序
+
+Superpowers 的工作流是一个**严格的 skill 调用链**，每个 skill 的末尾硬编码了下一个 skill 的调用：
+
+```
+Skill 调用链（源码中的 HARD-GATE）：
+  brainstorming ──终态──▶ writing-plans（唯一出口）
+  writing-plans ──终态──▶ subagent-driven-development（有 subagent）
+                         executing-plans（无 subagent）
+  subagent-driven-dev ──▶ finishing-a-development-branch
+  executing-plans ──────▶ finishing-a-development-branch
+```
+
+```
+Skill 1: BRAINSTORMING
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+
+  HARD-GATE: 设计未被用户批准前，禁止写任何代码、
+  调用任何实现 skill、或创建项目脚手架。
+
+1.1 探索项目上下文             AI     —
+    (文件/文档/最近提交)
+    ★ 先评估范围：若描述多个独立子系统
+      → 立即标记，先拆解为子项目
+      → 每个子项目各自走 spec → plan → implement
+        │
+        ▼
+1.2 提供可视化伴侣（可选）     AI     .superpowers/brainstorm/<session>/
+    ★ 仅在预判有视觉类问题时提供        ├─ *.html（原型）
+    ★ 必须是独立消息，不混合其他内容     └─ .events（交互事件）
+    ★ 接受后仍逐问题判断是否用浏览器
+        │
+        ▼
+1.3 逐个提出澄清问题           AI↔用户  —
+    ★ 每消息只问一个问题
+    ★ 优先多选题，也可开放式
+    ★ 聚焦：目的/约束/成功标准
+        │
+        ▼
+1.4 提出 2-3 个方案            AI     —
+    ★ 含权衡分析
+    ★ 领先推荐方案 + 理由
+        │
+        ▼
+1.5 分章节呈现设计              AI     —
+    ★ 按复杂度缩放每节篇幅
+      简单：几句话 / 复杂：200-300 词
+    ★ 覆盖：architecture, components,
+      data flow, error handling, testing
+    ★ 每节结束后问用户是否 OK
+    ★ 设计原则：隔离+清晰边界+可独立测试
+        │
+        ▼
+1.6 ★ 用户批准设计 ★           用户    —
+        │
+        ▼
+1.7 写入设计规范文档 + git commit  AI
+    docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+        │
+        ▼
+1.8 Spec 审查循环               AI     Spec Review 报告（内存）
+    派发 spec-document-reviewer
+    subagent（精心构造上下文，
+    不传递 session 历史）
+    ├─ Approved → 继续
+    └─ Issues → 修复 → 重审（最多 5 轮）
+        │
+        ▼
+1.9 用户审阅门禁                用户    —
+    "Spec written and committed to <path>.
+     Please review..."
+    ├─ 用户要求修改 → 回到 1.7 修改 + 重审
+    └─ 用户批准 → 继续
+        │
+        ▼
+1.10 ──▶ 调用 writing-plans
+    ★ 终态：唯一出口是 writing-plans
+    ★ 禁止调用 frontend-design/mcp-builder 等
+
+──────────────────────────────────────────────────────────────────
+
+Skill 2: WRITING-PLANS
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+
+  前提：应在 worktree 中运行
+
+2.1 范围检查                   AI     —
+    ★ spec 覆盖多个独立子系统？
+      → 建议拆分为多个 plan
+      → 每个 plan 独立可测
+        │
+        ▼
+2.2 文件结构映射               AI     —
+    ★ 先确定文件创建/修改清单
+    ★ 设计清晰边界和接口
+    ★ 偏好小而聚焦的文件
+    ★ 现有代码库中遵循既有模式
+        │
+        ▼
+2.3 编写计划文档               AI
+    docs/superpowers/plans/YYYY-MM-DD-<feature>.md
+
+    文档结构（必须包含 header）：
+    ┌──────────────────────────────────────────┐
+    │ # [Feature] Implementation Plan          │
+    │ > For agentic workers: REQUIRED: Use     │
+    │   superpowers:subagent-driven-development│
+    │ **Goal:** ...                            │
+    │ **Architecture:** ...                    │
+    │ **Tech Stack:** ...                      │
+    │ ---                                      │
+    │ ## Chunk 1: <name>  (每 chunk ≤1000 行)  │
+    │ ### Task 1: [Component]                  │
+    │ **Files:**                               │
+    │ - Create: exact/path/file.py             │
+    │ - Modify: exact/path/existing.py:123-145 │
+    │ - Test: tests/exact/path/test.py         │
+    │                                          │
+    │ - [ ] Step 1: Write failing test         │
+    │       (完整代码)                          │
+    │ - [ ] Step 2: Run test (expect FAIL)     │
+    │       (精确命令 + 预期输出)               │
+    │ - [ ] Step 3: Write implementation       │
+    │       (完整代码)                          │
+    │ - [ ] Step 4: Run test (expect PASS)     │
+    │       (精确命令 + 预期输出)               │
+    │ - [ ] Step 5: Commit                     │
+    │       (精确 git 命令)                     │
+    └──────────────────────────────────────────┘
+    ★ 每步 2-5 分钟
+    ★ 精确文件路径 + 完整代码（不写 "add validation"）
+    ★ 精确命令 + 预期输出
+    ★ DRY / YAGNI / TDD / 频繁提交
+        │
+        ▼
+2.4 Plan 审查循环               AI     Plan Review 报告（内存）
+    逐 chunk 派发 plan-document-reviewer
+    (精心构造上下文，不传 session 历史)
+    ├─ Approved → 下一 chunk 或完成
+    └─ Issues → 修复 → 重审（最多 5 轮）
+        │
+        ▼
+2.5 "Plan complete. Ready to execute?"  用户    —
+        │
+        ├── 有 subagent 能力？
+        │   ★ REQUIRED: 使用 subagent-driven-development
+        │   ★ 不提供选择
+        │
+        └── 无 subagent？
+            → 使用 executing-plans
+
+──────────────────────────────────────────────────────────────────
+
+[前置] Skill: USING-GIT-WORKTREES（执行前 REQUIRED）
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+W.1 选择 worktree 目录         AI     —
+    .worktrees/ > worktrees/ > CLAUDE.md > 问用户
+W.2 安全验证：确认已 gitignore  AI     .gitignore（如需更新）
+W.3 创建 worktree + 新分支     AI     worktree 目录
+W.4 项目 setup + 基线测试      AI     —
+
+──────────────────────────────────────────────────────────────────
+
+Skill 3A: SUBAGENT-DRIVEN-DEVELOPMENT（有 subagent 时）
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+
+  核心原则：Fresh subagent per task +
+  两阶段审查 (spec → quality) = 高质量快速迭代
+
+3.1 读取计划, 提取所有 task     AI     TodoWrite 任务列表
+    完整文本，创建 TodoWrite
+        │
+  ┌─▶ 3.2 派发 Implementer 子代理 ────────────────────────────┐
+  │   (根据任务复杂度选择 model：                              │
+  │    1-2 文件+明确 spec → cheap model                       │
+  │    多文件+集成 → standard model                           │
+  │    架构/设计/审查 → most capable model)                    │
+  │       │                                                  │
+  │       ├── DONE → 继续审查                                 │
+  │       ├── DONE_WITH_CONCERNS → 读 concerns，              │
+  │       │   正确性/范围问题先解决                             │
+  │       ├── NEEDS_CONTEXT → 补充上下文，重新派发              │
+  │       └── BLOCKED → 评估：                                │
+  │           ├─ 上下文不足 → 补充 → 重派                      │
+  │           ├─ 推理不足 → 用更强 model 重派                   │
+  │           ├─ 任务太大 → 拆分                               │
+  │           └─ 计划本身有误 → 上报人类                        │
+  │       │                                                  │
+  │       ▼                                                  │
+  │   3.3 派发 Spec Reviewer 子代理                           │
+  │   ★ 必须先 spec 审查，再 quality 审查（顺序不可逆）         │
+  │       ├── Approved → 继续                                 │
+  │       └── Issues → Implementer 修复 → 重审                │
+  │       │                                                  │
+  │       ▼                                                  │
+  │   3.4 派发 Code Quality Reviewer 子代理                   │
+  │       ├── Approved → 继续                                 │
+  │       └── Issues → Implementer 修复 → 重审                │
+  │       │                                                  │
+  │       ▼                                                  │
+  │   3.5 标记任务完成            AI     TodoWrite 更新         │
+  │       │                                                  │
+  └───┤ 还有任务？──是──┘                                      │
+      │                                                      │
+      否                                                     │
+      │                                                      │
+      ▼                                                      │
+3.6 最终代码审查（整体实现）    子代理                          │
+        │                                                    │
+        ▼                                                    │
+3.7 ──▶ 调用 finishing-a-development-branch                   │
+                                                             │
+  产出物（每个 task）：                                        │
+  - 源代码 + 测试               (Implementer)                │
+  - Git commit                   (Implementer)                │
+  - Implementer 报告（内存）     DONE/CONCERNS/BLOCKED/CONTEXT│
+  - Spec Compliance 报告（内存） Approved / Issues Found      │
+  - Code Quality 报告（内存）    Strengths/Issues/Assessment  │
+  └────────────────────────────────────────────────────────┘
+
+──────────────────────────────────────────────────────────────────
+
+Skill 3B: EXECUTING-PLANS（无 subagent 时）
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+3.1 加载计划, 批判性审视        AI     —
+    有关注点? → 先与人类伙伴讨论
+3.2 创建 TodoWrite             AI     TodoWrite 任务列表
+  ┌─▶ 3.3 执行任务（严格按 Step 顺序）  AI     源代码 + 测试 + Git commit
+  │   3.4 运行验证                     AI     —
+  │       ├── 失败? → 修复 → 重验
+  │       ├── 反复失败? → STOP，求助
+  │   3.5 标记完成                     AI     TodoWrite 更新
+  └───┤ 还有任务？──是──┘
+      否 → 调用 finishing-a-development-branch
+
+──────────────────────────────────────────────────────────────────
+
+Skill 4: FINISHING-A-DEVELOPMENT-BRANCH
+══════════════════════════════════════════════════════════════════
+步骤                          角色    产出物
+──────────────────────────────────────────────────────────────────
+4.1 运行测试套件               AI     —
+    失败? → STOP，显示失败，不继续
+4.2 确定 base branch           AI     —
+    git merge-base HEAD main/master
+4.3 向用户提供 4 个精确选项     用户    —
+    ① Merge 到 <base> locally
+    ② Push + 创建 PR
+    ③ Keep as-is
+    ④ Discard（需键入 "discard" 确认）
+4.4 执行用户选择               AI     ① merge + 删除分支
+                                       ② git push -u + gh pr create
+                                       ③ 保持现状
+                                       ④ 删除分支（确认后）
+4.5 清理 worktree              AI     ①④ → git worktree remove
+    ③ → 保留 worktree                  ② → 保留 worktree
+
+──────────────────────────────────────────────────────────────────
+
+辅助 Skill: SYSTEMATIC-DEBUGGING（遇到 bug 时随时调用）
+══════════════════════════════════════════════════════════════════
+Phase 1: 根因调查 → Phase 2: 模式分析 → Phase 3: 假设验证
+→ Phase 4: 实施修复（调用 TDD 创建失败测试 → 单一修复 → 验证）
+★ ≥3 次修复失败 → 质疑架构，与人类讨论
+
+辅助 Skill: VERIFICATION-BEFORE-COMPLETION（声称完成前的门禁）
+══════════════════════════════════════════════════════════════════
+IDENTIFY(什么命令能证明?) → RUN(执行完整命令) → READ(读完整输出)
+→ VERIFY(输出确认了吗?) → CLAIM(带证据声称)
+```
+
+### 3. 双框架并排时间线对比
+
+```
+时间轴 ──────────────────────────────────────────────────────────▶
+
+  OpenSpec                            Superpowers
+  ════════                            ═══════════
+
+  ┌───────────────────┐               ┌───────────────────┐
+  │ /opsx:propose      │               │ brainstorming      │
+  │                   │               │                   │
+  │ 用户描述意图       │               │ 1.1 探索项目上下文  │
+  │ → 推导 change-id  │               │ 1.2 可视化伴侣(opt)│
+  │                   │               │ 1.3 逐个澄清问题   │
+  │                   │               │ 1.4 提出 2-3 方案  │
+  │ (依赖图自动编排)   │               │ 1.5 分节呈现设计   │
+  │                   │               │                   │
+  │ ① proposal.md     │ ◄─重叠───►   │ (隐含在对话中,     │
+  │   Why/What/       │               │  不产出 proposal)  │
+  │   Capabilities/   │               │                   │
+  │   Impact          │               │ 1.6 用户批准       │
+  │                   │               │                   │
+  │ ② specs/**/*.md   │ (SP 无对应)   │ 1.7 design.md ◄─┐ │
+  │   ADDED/MODIFIED/ │               │   architecture  │ │
+  │   REMOVED/RENAMED │               │   components    │ │
+  │   + Scenarios     │               │   data flow     │ │
+  │                   │               │   error handling│ │
+  │ ③ design.md       │ ◄─重叠───►   │   testing     ──┘ │
+  │   Context/Goals/  │               │                   │
+  │   Decisions/Risks │               │ 1.8 spec 审查循环  │
+  │                   │               │   (subagent, ≤5轮) │
+  │ ④ tasks.md        │               │ 1.9 用户审阅门禁   │
+  │   - [ ] 粗粒度     │               │                   │
+  │                   │               │ ★ 无 delta spec   │
+  │ (无 subagent 审查) │ ◄─差异───    │ ★ 有 subagent 审查 │
+  │ (有 CLI validate) │               │ ★ 无 CLI validate │
+  └────────┬──────────┘               └────────┬──────────┘
+           │                                   │
+           │                                   ▼
+           │ (OpenSpec 无对应)         ┌───────────────────┐
+           │                          │ writing-plans      │
+           │                          │                   │
+           │                          │ 2.1 范围检查      │
+           │                          │ 2.2 文件结构映射   │
+           │                          │ 2.3 plan 文档     │
+           │                          │   Chunk/Task/Step │
+           │                          │   精确到文件:行号  │
+           │                          │   完整代码 + 命令  │
+           │                          │ 2.4 plan 审查循环  │
+           │                          │   (subagent, ≤5轮) │
+           │                          │ 2.5 用户确认执行   │
+           │                          └────────┬──────────┘
+           │                                   │
+           ▼                                   ▼
+  ┌───────────────────┐        ┌─────────────────────────┐
+  │ /opsx:apply        │        │ [前置] git worktree 创建 │
+  │                   │        └───────────┬─────────────┘
+  │ 读取上下文         │                    │
+  │ (contextFiles      │        ┌───────────┴───────────┐
+  │  from CLI)         │        │ subagent-driven-dev   │ executing-
+  │                   │        │ (有 subagent 时)       │ plans
+  │ 逐任务实现         │ ◄───► │                       │
+  │ 标记 - [x]        │        │ 每 task:              │
+  │                   │        │ Implementer 子代理     │
+  │ ★ 无 TDD 要求     │ ◄差异  │ → Spec Reviewer       │
+  │ ★ 无代码审查      │ ◄差异  │ → Code Quality Review │
+  │ ★ fluid: 可随时   │        │                       │
+  │   更新 artifact   │        │ 最终代码审查           │
+  │ ★ 遇阻→暂停+指导 │        │                       │
+  └────────┬──────────┘        └───────────┬───────────┘
+           │                               │
+           │                               ▼
+  ┌────────┴──────────┐        ┌───────────────────────┐
+  │ [可选] /opsx:verify│        │ finishing-branch       │
+  │ 三维度验证报告     │        │                       │
+  │ Completeness      │ ◄对应► │ 4.1 运行测试           │
+  │ Correctness       │        │ 4.3 四选项             │
+  │ Coherence         │        │ 4.4 执行(merge/PR/     │
+  └────────┬──────────┘        │     keep/discard)     │
+           │                   │ 4.5 清理 worktree     │
+           ▼                   └───────────────────────┘
+  ┌───────────────────┐                    │
+  │ /opsx:archive      │                    ▼
+  │                   │          分支合并/PR/保留/丢弃
+  │ 检查完成状态       │          (设计文档留存但
+  │ 同步 delta → 主规范│           不参与后续管理)
+  │ 归档到 archive/    │
+  │                   │
+  │ ★ 智能合并        │ (SP 无对应)
+  │ ★ 幂等操作        │ (SP 无对应)
+  └───────────────────┘
+           │
+           ▼
+     specs/ 更新为
+     长期 source of truth
+```
+
+### 4. 关键时序差异总结
+
+| 时序阶段 | OpenSpec（源码实际逻辑） | Superpowers（源码实际逻辑） | 差异说明 |
+|---------|------------------------|--------------------------|---------|
+| **入口模式** | 多入口：`/opsx:new`（逐步）、`/opsx:propose`（一步到位）、`/opsx:ff`（快进）、`/opsx:continue`（续做） | 单入口：brainstorming 是唯一起点，HARD-GATE 禁止跳过 | OpenSpec 更灵活，Superpowers 更严格 |
+| **需求理解** | 无输入时用 AskUserQuestion 问一次，然后推导 change name | 先探索项目上下文，逐个问澄清问题，评估范围是否需拆解 | Superpowers 需求挖掘更深 |
+| **设计过程** | 按 DAG 依赖序自动编排 artifact（proposal→specs→design→tasks），AI 全自动生成 | 分节呈现设计 → 每节用户确认 → 用户批准 → 写文档 → subagent 审查(≤5轮) → 用户审阅门禁 | OpenSpec 更高效，Superpowers 更严谨 |
+| **设计文档** | `proposal.md`（Why/What）+ `design.md`（How） 分开 | 单一 `*-design.md`（architecture/components/data flow/error handling/testing 混合） | OpenSpec 关注点分离更清晰 |
+| **需求规范** | `specs/**/*.md`：正式的 ADDED/MODIFIED/REMOVED delta spec，使用 SHALL/MUST 规范语言，每个 Requirement 必须有 Scenario | 无独立的需求规范文件 | OpenSpec 独有，可测试、可追踪 |
+| **任务拆解** | `tasks.md`：粗粒度 checkbox，按组编号，一个 session 内可完成 | Plan 文档：细粒度 Chunk→Task→Step，精确到文件:行号，包含完整代码 + 精确命令 + 预期输出 | Superpowers 粒度显著更细 |
+| **设计→实现** | 无中间层，tasks 就是执行单元 | brainstorming → writing-plans → execution（多一层 plan，且 plan 有独立审查） | Superpowers 多一层 plan 文档 |
+| **代码隔离** | 无隔离要求 | REQUIRED: git worktree（强制） | Superpowers 强制隔离 |
+| **实现过程** | 读 contextFiles → 逐任务实现 → 标记 `[x]`。fluid：可随时更新 artifact，不锁阶段 | subagent-driven: 每任务 fresh subagent + 双阶段审查(spec→quality)。executing-plans: 严格按 Step 执行 | Superpowers 过程管控远强于 OpenSpec |
+| **实现遇阻** | 暂停 → 建议更新 artifact → 等待用户指导。"Don't guess" | subagent: BLOCKED/NEEDS_CONTEXT → 补上下文/换 model/拆任务/上报人类 | 两者都不强行推进，但处理机制不同 |
+| **验证** | `/opsx:verify`：三维度验证（Completeness/Correctness/Coherence），CRITICAL/WARNING/SUGGESTION 分级 | verification-before-completion：IDENTIFY→RUN→READ→VERIFY→CLAIM 门禁 | OpenSpec 验证更结构化，Superpowers 更即时 |
+| **收尾** | `/opsx:archive`：检查完成 → 同步 delta→主规范（智能合并、幂等） → 归档到 archive/ | finishing-branch：测试 → 四选项(merge/PR/keep/discard) → 清理 worktree | 完全不同的关注点 |
+| **长期价值** | `openspec/specs/` 作为活文档持续演进，变更历史在 `archive/` | 设计文档留存在 `docs/superpowers/specs/` 但不参与后续管理 | OpenSpec 的核心优势 |
+
+---
+
+## 四、其他核心区别
+
+### 1. 关注层次不同
+
+- **OpenSpec** 关注的是「需求到代码」的对齐——确保你构建的东西是对的（build the right thing）。规范是第一公民，代码是规范的产物。
+- **Superpowers** 关注的是「构建过程」的质量——确保你正确地构建（build it right）。TDD、系统化调试、代码审查构成质量保障链。
+
+### 2. 产出物生命周期不同
+
+- **OpenSpec** 产出持久化的规范文档（`openspec/specs/`），变更在 `changes/` 中管理，完成后归档到 `changes/archive/`。规范跨项目生命周期存在，是长期知识资产。delta spec 的智能合并（幂等、增量更新）保证规范始终反映最新状态。
+- **Superpowers** 产出临时性的 Plan 文件和 Git worktree。Plan 是执行指南，执行完即结束。设计规范文档留存在 `docs/superpowers/specs/` 但不参与后续变更管理——没有 delta、merge、archive 机制。
+
+### 3. 铁律（Iron Laws）不同
+
+- **OpenSpec**：
+  - 先写规范再写代码——specs 是唯一真相源
+  - 任何行为/架构/安全/性能变更必须从 `changes/` 开始
+  - `design.md` 是可选的——仅在跨模块/新依赖/安全性能/数据模型变更时创建
+  - "fluid not rigid"——可随时更新 artifact，不锁定阶段门禁
+
+- **Superpowers**：
+  - HARD-GATE：设计未被用户批准前，禁止写任何代码
+  - 先写测试再写代码（TDD RED→GREEN→REFACTOR）
+  - 先查根因再修 bug（systematic-debugging）
+  - 先验证再声称完成（verification-before-completion：IDENTIFY→RUN→READ→VERIFY→CLAIM）
+  - 绝不跳过流程——skill 链硬编码，每个 skill 唯一出口指向下一个
+
+### 4. 流程刚性不同
+
+- **OpenSpec** "fluid not rigid"：`/opsx:apply` 可随时调用（不必等所有 artifact 完成），发现设计问题时建议更新 artifact 而非锁定阶段。多入口（`/opsx:new`、`/opsx:propose`、`/opsx:ff`、`/opsx:continue`）适配不同场景。
+- **Superpowers** HARD-GATE：brainstorming 是唯一起点，每个 skill 的终态硬编码指向下一个 skill（brainstorming→writing-plans→subagent-driven-dev→finishing-branch），不提供跳过选项。
+
+### 5. 审查机制不同
+
+- **OpenSpec**：提供 `/opsx:verify` 做三维度验证（Completeness/Correctness/Coherence），但这是可选的。Archive 时会检查完成状态但仅警告、不阻塞。
+- **Superpowers**：审查是强制内嵌的——brainstorming 有 spec-document-reviewer（≤5轮），writing-plans 有 plan-document-reviewer（≤5轮），subagent-driven-dev 有两阶段审查（spec compliance→code quality，顺序不可逆）。
+
+## 五、联系与互补
+
+两者覆盖了开发生命周期的**不同阶段**，天然互补：
+
+```
+开发生命周期覆盖范围：
+
+  OpenSpec 独有              重叠区               Superpowers 独有
+  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────┐
+  │ delta spec   │    │ 需求理解     │    │ writing-plans         │
+  │  ADDED/      │    │ 设计探索     │    │  Chunk/Task/Step      │
+  │  MODIFIED/   │    │ 架构决策     │    │  精确到文件:行号       │
+  │  REMOVED/    │    │              │    │                       │
+  │  RENAMED     │    │ proposal ≈   │    │ TDD RED→GREEN→REFACTOR│
+  │              │    │ brainstorming│    │                       │
+  │ 规范智能合并  │    │              │    │ systematic-debugging  │
+  │  (幂等)      │    │ design.md ≈  │    │                       │
+  │              │    │ *-design.md  │    │ subagent 审查          │
+  │ 变更归档     │    │ (但角度不同)  │    │  spec + code quality  │
+  │  archive/    │    │              │    │                       │
+  │              │    │              │    │ git worktree 隔离      │
+  │ /opsx:verify │    │              │    │                       │
+  │  三维度验证   │    │              │    │ verification-before-  │
+  │              │    │              │    │  completion           │
+  │ 长期规范演进  │    │              │    │                       │
+  │  specs/ 活文档│    │              │    │ finishing-branch      │
+  └──────────────┘    └──────────────┘    │  merge/PR/keep/discard│
+                                          └───────────────────────┘
+```
+
+**重叠区域**：
+- OpenSpec 的 `proposal.md`（Why/What）≈ Superpowers 的 `brainstorming`（需求理解 + 方案探索）
+- OpenSpec 的 `design.md`（Context/Decisions/Risks）与 Superpowers 的 `*-design.md`（Architecture/Components/Data Flow）在架构设计上重叠，但角度不同——OpenSpec 偏决策（Why X over Y），Superpowers 偏实现（怎么做）
+
+**互补区域**：
+- OpenSpec 缺少：TDD、系统化调试、代码审查、Git worktree 隔离、细粒度执行计划
+- Superpowers 缺少：持久化规范管理、delta spec 增量机制、变更追踪与归档、规范智能合并
+
+## 六、融合可行性分析
+
+**融合是合理且可行的**，具体方案：
+
+### 融合工作流
+
+```
+┌─ OpenSpec 层 ─────────────────────────────────────────────┐
+│ 1. /opsx:propose "feature-name"                           │
+│    - 替代 brainstorming 的需求挖掘输出                     │
+│    - 自动生成：proposal.md → specs/**/*.md →               │
+│      design.md(可选) → tasks.md                           │
+│    - 产出：openspec/changes/<name>/                        │
+│    ★ OpenSpec 的 Capabilities 章节直接驱动 delta spec 生成  │
+├───────────────────────────────────────────────────────────┤
+│ 2. OpenSpec tasks → Superpowers Plan 转换                  │
+│    - 以 proposal + specs + design + tasks 为输入           │
+│    - writing-plans 将粗粒度 tasks 展开为                   │
+│      Chunk/Task/Step + 精确文件:行号 + TDD 步骤            │
+│    ★ OpenSpec 的 specs (SHALL/MUST + Scenarios)            │
+│      为 Superpowers 的 spec compliance 审查提供基准         │
+├─ Superpowers 层 ──────────────────────────────────────────┤
+│ 3. 执行（subagent-driven-development）                     │
+│    - 每 task：Implementer → Spec Reviewer → Quality Review │
+│    ★ Spec Reviewer 可直接对照 OpenSpec delta specs 验证     │
+│    - TDD RED→GREEN→REFACTOR                               │
+│    - systematic-debugging（遇阻时）                        │
+│    - verification-before-completion                        │
+├─ OpenSpec 层 ─────────────────────────────────────────────┤
+│ 4. /opsx:verify                                           │
+│    - 三维度验证（Completeness/Correctness/Coherence）      │
+│    - 对照 specs 的 Scenario 验证实现完整性                  │
+├─ 收尾 ────────────────────────────────────────────────────┤
+│ 5. /opsx:archive + finishing-a-development-branch          │
+│    - 同步 delta → 主规范（智能合并）                        │
+│    - 归档到 changes/archive/                               │
+│    - 测试 → merge/PR/keep/discard → 清理 worktree         │
+└───────────────────────────────────────────────────────────┘
+```
+
+### 融合的优势
+
+1. **OpenSpec 解决了 Superpowers 的弱点**：Superpowers 的设计文档留存但不管理，项目缺乏长期规范积累。融合后，`openspec/specs/` 成为项目知识库，delta spec 的 ADDED/MODIFIED/REMOVED 机制保证规范随代码演进。
+2. **Superpowers 解决了 OpenSpec 的弱点**：OpenSpec 的 apply 阶段仅「读上下文、做任务、标完成」，无 TDD、无代码审查、无调试方法论。融合后，TDD + 双阶段审查 + 系统化调试保证实现质量。
+3. **specs 的 Scenario 成为 TDD 的测试用例来源**：OpenSpec 的 `#### Scenario: <name>` + WHEN/THEN 格式天然映射为 Superpowers 的 RED 阶段测试。
+4. **全链路可追溯**：proposal(why) → specs(what) → design(how) → plan(steps) → test → code → review → archive。
+
+### 融合的风险
+
+| 风险 | 缓解措施 |
+|------|---------|
+| **流程过重**：小任务需要走完整链路 | 设定阈值——bug fix/小改动跳过 OpenSpec 层，直接用 Superpowers |
+| **重复劳动**：brainstorming 和 proposal 重叠 | 用 `/opsx:propose` 替代 brainstorming——其 proposal.md 已覆盖需求理解和设计探索 |
+| **目录结构冲突**：两套文件体系 | 统一约定——`openspec/` 管规范和变更，`docs/superpowers/plans/` 管执行计划 |
+| **审查重复**：OpenSpec verify + Superpowers spec/code review | `/opsx:verify` 做全局完整性检查，Superpowers 审查做逐 task 细粒度检查——互补而非重复 |
+| **刚性冲突**：OpenSpec fluid vs Superpowers HARD-GATE | 在 propose 阶段用 OpenSpec 的 fluid 模式，进入执行阶段后用 Superpowers 的 HARD-GATE |
+
+### 实际建议
+
+- **大特性/多阶段项目**：完整融合流程（OpenSpec propose + Superpowers plan/execute + OpenSpec archive）
+- **中等任务**：跳过 OpenSpec，直接 brainstorming → plan → execute
+- **小修小补**：直接 TDD 或 systematic-debugging
+
+## 七、Skill 改造方案：brainstorming → OpenSpec → writing-plans 链路
+
+> 通过修改 Superpowers 的 3 个 SKILL.md 文件，实现 brainstorming 的交互式需求挖掘 + OpenSpec 的正式规范产出 + writing-plans 的细粒度执行计划三段融合。
+
+### 1. 改造目标
+
+```
+原链路（Superpowers 原生）：
+  brainstorming → 写 *-design.md → spec-document-reviewer 审查
+    → writing-plans → subagent-driven-dev
+
+改造后链路（OpenSpec 已安装 + 大功能）：
+  brainstorming → /opsx:propose → writing-plans → subagent-driven-dev
+  (需求挖掘+     (正式产出         (以 OpenSpec      (Spec Reviewer
+   设计对齐)      proposal/specs/    产出为输入,       对照 delta specs
+                  design/tasks)      展开为 TDD plan)  审查实现)
+
+Fallback 链路（OpenSpec 未安装 或 中小改动）：
+  brainstorming → 写 *-design.md → spec-document-reviewer 审查
+    → writing-plans → subagent-driven-dev（原流程不变）
+```
+
+### 2. Superpowers spec-document-reviewer 详解
+
+在讨论改造前，先理解 brainstorming 原流程中 **spec-document-reviewer** 做了什么——这决定了改造后需要保留还是替代它。
+
+#### spec-document-reviewer 是什么
+
+它是 brainstorming 步骤 1.8 派发的一个 **subagent**（非独立 skill），用于在 design spec 写入文件后、用户审阅前，进行自动化质量审查。
+
+#### 审查维度（7 项）
+
+| 审查类别 | 具体检查内容 |
+|---------|-------------|
+| **Completeness** | TODO 标记、占位符文字、"TBD"、未完成的章节 |
+| **Coverage** | 遗漏的错误处理、边界场景、集成点 |
+| **Consistency** | 内部矛盾、冲突的需求描述 |
+| **Clarity** | 模糊的需求（歧义表述） |
+| **YAGNI** | 未请求的功能、过度工程 |
+| **Scope** | 是否聚焦到单个 plan 的范围——不应覆盖多个独立子系统 |
+| **Architecture** | 单元是否有清晰边界、接口是否定义良好、是否可独立理解和测试 |
+
+#### 审查特别关注（CRITICAL）
+
+- 任何 TODO 标记或占位文字
+- "to be defined later" 或 "will spec when X is done" 的章节
+- 明显比其他章节缺乏细节的部分
+- 缺乏清晰边界或接口的单元——能否不读内部实现就理解每个单元的职责
+
+#### 输出格式
+
+```
+## Spec Review
+**Status:** ✅ Approved | ❌ Issues Found
+**Issues (if any):**
+- [Section X]: [specific issue] - [why it matters]
+**Recommendations (advisory):**
+- [suggestions that don't block approval]
+```
+
+#### 审查流程
+
+```
+brainstorming 1.7 写入 *-design.md
+       │
+       ▼
+brainstorming 1.8 派发 spec-document-reviewer subagent
+  ★ 精心构造上下文，不传递 session 历史
+  ★ 只传 spec 文件路径
+       │
+       ├── ✅ Approved → 继续到 1.9 用户审阅
+       └── ❌ Issues Found → 修复问题 → 重新审查（最多 5 轮）
+```
+
+#### 改造后的处理
+
+| 场景 | spec-document-reviewer 的角色 |
+|------|------------------------------|
+| **走融合链路**（OpenSpec 已安装 + 大功能） | **不再需要**。OpenSpec 产出的 proposal/specs/design 有自己的结构约束（SHALL/MUST、Scenario 必须有 WHEN/THEN），质量由模板 + 用户审阅保障。如需审查，可用 `/opsx:verify` 替代 |
+| **走原流程**（OpenSpec 未安装 或 中小改动） | **保留不变**。仍然写 `*-design.md`，仍然派发 spec-document-reviewer 审查 |
+
+### 3. 修改 brainstorming/SKILL.md
+
+**目标**：终态从"写 design.md → 跳 writing-plans"改为"路由判断 → 融合链路或原流程 → 跳 writing-plans"
+
+#### 保留不变的步骤（1.1 - 1.6）
+
+brainstorming 的核心价值在于交互式需求挖掘，全部保留：
+
+| 步骤 | 内容 | 保留原因 |
+|------|------|---------|
+| 1.1 | 探索项目上下文 + 范围评估 | OpenSpec propose 不做这个 |
+| 1.2 | 可视化伴侣（可选） | UI 类需求需要原型 |
+| 1.3 | 逐个澄清问题 | 需求挖掘深度远超 OpenSpec |
+| 1.4 | 提出 2-3 个方案 + 权衡 | OpenSpec 无方案对比机制 |
+| 1.5 | 分节呈现设计 + 每节确认 | 用户参与度保障 |
+| 1.6 | 用户批准设计方向 | 关键门禁 |
+
+#### 修改步骤 1.5（增强）
+
+在分节呈现设计时，**增加 Capabilities 识别**：
+
+```markdown
+# 原 1.5 增加一个环节：
+
+在讨论 architecture/components 时，同步识别：
+- **New Capabilities**：本次变更引入的新能力，用 kebab-case 命名
+  （每个将成为 OpenSpec 的 specs/<name>/spec.md）
+- **Modified Capabilities**：本次变更影响的已有能力
+  （检查 openspec/specs/ 目录确认已有哪些 spec）
+- 将识别结果呈现给用户确认
+
+★ 这是 brainstorming 和 OpenSpec 之间的关键桥梁。
+  brainstorming 原生不产出这个信息，但 OpenSpec 的
+  proposal.md 的 ## Capabilities 章节需要它。
+```
+
+#### 替换步骤 1.7 - 1.10
+
+```markdown
+# 删除原 1.7（写入 *-design.md + git commit）
+# 删除原 1.8（spec-document-reviewer 审查）
+# 替换为：
+
+## 1.7 用户确认设计方向
+将对话中达成的共识总结给用户：
+- Why：为什么做这个变更
+- What Changes：具体变更清单
+- Capabilities：新能力 + 修改的已有能力
+- 架构决策：关键技术选择和理由
+- 影响范围：受影响的代码/API/依赖
+
+"以上是我们讨论达成的共识，确认后我将通过 OpenSpec
+ 生成正式的规范文档。"
+
+## 1.8 路由判断：OpenSpec 还是原流程
+
+检查两个条件决定走哪条链路：
+
+  条件 A：OpenSpec 是否可用？
+    → 执行 `openspec --version`
+    → 成功 = 已安装 / 失败 = 未安装
+
+  条件 B：变更规模是否适合融合流程？
+    → 评估标准（满足任一即为"大功能"）：
+      - 涉及 ≥2 个独立模块/子系统
+      - 需要新建 ≥3 个文件
+      - 影响公共 API 或数据模型
+      - 有跨团队协作需求
+      - 需要长期规范沉淀（后续还会迭代）
+
+  路由决策：
+  ┌────────────────────┬──────────────────────────────┐
+  │ 条件               │ 走哪条链路                    │
+  ├────────────────────┼──────────────────────────────┤
+  │ A ✓ + B ✓          │ → 1.8a 融合链路（OpenSpec）   │
+  │ A ✓ + B ✗          │ → 1.8b 原流程（design.md）   │
+  │ A ✗（未安装）       │ → 1.8b 原流程（design.md）   │
+  └────────────────────┴──────────────────────────────┘
+
+  ★ 路由结果告知用户：
+    融合："将通过 OpenSpec 生成正式规范文档。"
+    原流程："将直接编写设计规范文档。"
+
+## 1.8a 融合链路：调用 OpenSpec propose
+用户确认后，执行：
+  /opsx:propose "<feature-name>"
+
+将 brainstorming 对话中的共识映射为 OpenSpec 输入：
+  对话中的 Why            → proposal.md ## Why
+  对话中的变更清单         → proposal.md ## What Changes
+  对话中识别的 Capabilities → proposal.md ## Capabilities
+  对话中的影响范围         → proposal.md ## Impact
+  对话中的架构决策         → design.md ## Decisions（如需）
+
+等待 OpenSpec 生成全部 artifact：
+  openspec/changes/<name>/
+  ├── proposal.md
+  ├── specs/<capability>/spec.md  (每个 Capability 一个)
+  ├── design.md                   (可选，复杂变更才创建)
+  └── tasks.md
+
+  → 跳到 1.9a（用户审阅 OpenSpec 产出）
+
+## 1.8b 原流程：写入 *-design.md + 审查
+  写入设计规范文档 + git commit：
+    docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+
+  派发 spec-document-reviewer subagent 审查：
+    ├── ✅ Approved → 继续
+    └── ❌ Issues Found → 修复 → 重审（最多 5 轮）
+
+  → 跳到 1.9b（用户审阅 design.md）
+
+## 1.9a 用户审阅 OpenSpec 产出（融合链路）
+"OpenSpec artifacts generated at openspec/changes/<name>/.
+ Key files to review:
+ - proposal.md — 变更动机和范围
+ - specs/ — 每个能力的正式需求规范（WHEN/THEN Scenarios）
+ - tasks.md — 粗粒度任务清单
+ Please review before proceeding to implementation planning."
+
+├─ 用户要求修改 → 更新对应 artifact → 重新审阅
+└─ 用户批准 → 继续
+
+## 1.9b 用户审阅 design.md（原流程）
+"Spec written and committed to <path>.
+ Please review..."
+├─ 用户要求修改 → 修改 + 重审
+└─ 用户批准 → 继续
+
+## 1.10 终态 → writing-plans
+★ 唯一出口：调用 writing-plans
+★ 融合链路：传递 OpenSpec change 路径作为上下文
+★ 原流程：传递 *-design.md 路径作为上下文（原行为）
+★ 禁止调用其他 implementation skill
+```
+
+#### HARD-GATE 修改
+
+```markdown
+# 原 HARD-GATE：
+"设计未被用户批准前，禁止写任何代码"
+
+# 改为：
+"设计未被用户批准前，禁止写任何代码、调用 writing-plans、
+ 或创建项目脚手架。"
+★ 融合链路：OpenSpec artifacts 未被用户审阅批准前
+★ 原流程：*-design.md 未通过 spec-document-reviewer 审查
+   + 用户审阅批准前
+```
+
+---
+
+### 4. 修改 writing-plans/SKILL.md
+
+**目标**：输入源支持两条链路——融合链路读 OpenSpec artifacts，原流程读 `*-design.md`。
+
+#### 修改步骤 2.1（输入来源）
+
+```markdown
+# 原 2.1：读取 docs/superpowers/specs/*-design.md
+
+# 改为：
+## 2.1 读取设计上下文
+
+判断上游来源（brainstorming 传递的上下文路径）：
+
+  ┌─ 融合链路（有 OpenSpec change 路径）：
+  │  读取 OpenSpec change 目录中的全部 artifact：
+  │    openspec/changes/<name>/
+  │    ├── proposal.md          → 理解 WHY + 变更范围 + 影响
+  │    ├── specs/**/*.md        → 每个 Requirement (SHALL/MUST)
+  │    │                           + 每个 Scenario (WHEN/THEN)
+  │    ├── design.md            → 技术决策和约束（如存在）
+  │    └── tasks.md             → 粗粒度任务骨架
+  │
+  └─ 原流程（有 *-design.md 路径）：
+     读取 docs/superpowers/specs/*-design.md（原行为不变）
+
+范围检查（两条链路共用）：
+- 覆盖多个独立子系统？ → 建议拆分为多个 plan
+- 融合链路：tasks.md 的任务组是否合理？ → 可调整分组
+```
+
+#### 修改步骤 2.3（Plan 编写逻辑）
+
+```markdown
+# 原 2.3：从 design.md 推导 Chunk/Task/Step
+
+# 改为：
+## 2.3 编写计划文档
+
+─── 融合链路：基于 OpenSpec tasks 展开 ───
+
+将 OpenSpec tasks.md 的粗粒度任务展开为细粒度 Plan：
+
+映射规则：
+  tasks.md 的 ## N. <Group>     → Plan 的 ## Chunk N: <Group>
+  tasks.md 的 - [ ] N.M <task>  → Plan 的 ### Task N.M: <task>
+
+每个 Task 必须包含：
+
+  ### Task N.M: <task description>
+  **Spec Reference:** specs/<capability>/spec.md
+    → Requirement: <name>
+    → Scenario: <scenario-name>
+  **Files:**
+  - Create: exact/path/file.py
+  - Modify: exact/path/existing.py:123-145
+  - Test: tests/exact/path/test.py
+
+  - [ ] Step 1: Write failing test
+        基于对应 Scenario 的 WHEN/THEN 编写测试：
+        - WHEN <condition> → 测试的 arrange/act
+        - THEN <outcome>  → 测试的 assert
+        (完整测试代码)
+  - [ ] Step 2: Run test (expect FAIL)
+        (精确命令 + 预期输出)
+  - [ ] Step 3: Write implementation
+        满足 Requirement 的 SHALL/MUST 要求
+        (完整实现代码)
+  - [ ] Step 4: Run test (expect PASS)
+        (精确命令 + 预期输出)
+  - [ ] Step 5: Commit
+        (精确 git 命令)
+
+★ 关键增加：每个 Task 必须标注 Spec Reference，
+  建立 plan → spec 的可追溯链。
+★ Scenario 的 WHEN/THEN 直接映射为 TDD Step 1 的测试用例。
+★ Requirement 的 SHALL/MUST 是 Step 3 实现的验收标准。
+
+─── 原流程：从 design.md 推导（原行为不变）───
+
+从 *-design.md 的各章节推导 Chunk/Task/Step。
+无 Spec Reference（因为没有 delta spec 文件）。
+其余 TDD 步骤结构不变。
+```
+
+#### Plan 文档 header 修改
+
+```markdown
+# 融合链路 header：
+> **OpenSpec Change:** openspec/changes/<name>/
+> **Spec Files:** specs/<cap1>/spec.md, specs/<cap2>/spec.md, ...
+> For agentic workers: REQUIRED: Use superpowers:subagent-driven-development
+
+# 原流程 header（不变）：
+> For agentic workers: REQUIRED: Use superpowers:subagent-driven-development
+```
+
+---
+
+### 5. 修改 subagent-driven-development/SKILL.md
+
+**目标**：融合链路时 Implementer/Reviewer 使用 OpenSpec artifacts；原流程时保持原行为不变。
+
+#### 修改步骤 3.2（Implementer 上下文构建）
+
+```markdown
+# 原逻辑：传递 plan task 文本 + design spec 路径
+
+# 改为：
+## 3.2 派发 Implementer 子代理
+
+构建 Implementer 上下文（根据 plan header 判断链路）：
+
+─── 融合链路（plan header 含 OpenSpec Change 路径）───
+- Plan 文档中当前 Task 的完整文本（含 Spec Reference）
+- 对应的 OpenSpec spec 文件全文：
+    openspec/changes/<name>/specs/<capability>/spec.md
+  → 包含 Requirement (SHALL/MUST) + Scenario (WHEN/THEN)
+- proposal.md 的 ## What Changes 和 ## Impact（变更动机和影响）
+- design.md 的 ## Decisions（技术决策，如存在）
+
+★ Implementer 必须满足 spec 中的 SHALL/MUST 要求。
+★ Implementer 必须让 Scenario 的 WHEN/THEN 对应的测试通过。
+
+─── 原流程（plan header 无 OpenSpec 路径）───
+- Plan 文档中当前 Task 的完整文本
+- *-design.md 的对应章节（原行为不变）
+```
+
+#### 修改步骤 3.3（Spec Reviewer 审查基准）
+
+```markdown
+# 原逻辑：对照 *-design.md 审查
+
+# 改为：
+## 3.3 派发 Spec Reviewer 子代理
+
+─── 融合链路 ───
+审查依据（按优先级）：
+1. openspec/changes/<name>/specs/<capability>/spec.md
+   - 每个 Requirement 的 SHALL/MUST 是否被实现满足
+   - 每个 Scenario 的 WHEN/THEN 是否有对应测试覆盖
+   - MODIFIED Requirements 的完整内容是否被正确更新
+   - REMOVED Requirements 是否已清除相关代码
+
+2. proposal.md 的 ## What Changes
+   - 实现是否覆盖了所有列出的变更项
+
+3. design.md 的 ## Decisions（如存在）
+   - 实现是否遵循了技术决策
+
+─── 原流程 ───
+审查依据：*-design.md（原行为不变）
+
+审查输出格式不变：Approved / Issues Found
+```
+
+#### 修改步骤 3.4（Code Quality Reviewer，微调）
+
+```markdown
+# 融合链路时，在 Code Quality Reviewer 的上下文中增加：
+- design.md 的 ## Risks / Trade-offs（如存在）
+  → 检查实现是否引入了已识别的风险
+  → 检查缓解措施是否到位
+
+# 原流程：不变
+```
+
+---
+
+### 6. 完整改造后的链路（含双路径）
+
+```
+brainstorming (1.1-1.6 保留不变)
+│
+│  1.1 探索项目上下文 + 范围评估
+│  1.2 可视化伴侣（可选）
+│  1.3 逐个澄清问题
+│  1.4 提出 2-3 方案 + 权衡
+│  1.5 分节呈现设计 + Capabilities 识别 ← 增强
+│  1.6 用户批准设计方向
+│
+│  1.7 用户确认共识总结
+│
+│  1.8 路由判断
+│      检查 A: openspec --version → 是否已安装
+│      检查 B: 变更规模 → 是否为大功能
+│      │
+│      ├── A ✓ + B ✓ ──→ 1.8a 融合链路
+│      │                  │
+│      │                  ▼
+│      │               /opsx:propose "<name>"
+│      │               OpenSpec 自动生成：
+│      │               openspec/changes/<name>/
+│      │               ├── proposal.md
+│      │               ├── specs/<cap>/spec.md
+│      │               ├── design.md (可选)
+│      │               └── tasks.md
+│      │                  │
+│      │                  ▼
+│      │               1.9a 用户审阅 OpenSpec 产出
+│      │                  │
+│      │                  ▼
+│      └── A ✗ 或 B ✗ → 1.8b 原流程
+│                        │
+│                        ▼
+│                     写 *-design.md + git commit
+│                     spec-document-reviewer 审查 (≤5轮)
+│                        │
+│                        ▼
+│                     1.9b 用户审阅 design.md
+│                        │
+│      ◄─────────────────┘
+│
+│  1.10 → writing-plans
+│         融合：传递 OpenSpec change 路径
+│         原流程：传递 *-design.md 路径
+│
+▼
+writing-plans
+│
+│  2.1 读取设计上下文
+│      融合：读 OpenSpec artifacts ← 改
+│      原流程：读 *-design.md（不变）
+│  2.2 文件结构映射（不变）
+│  2.3 编写计划
+│      融合：tasks.md → Chunk/Task/Step + Spec Reference ← 改
+│      原流程：从 design.md 推导（不变）
+│  2.4 plan 审查循环（不变）
+│  2.5 用户确认执行（不变）
+│
+▼
+[git worktree 创建]（不变）
+│
+▼
+subagent-driven-dev
+│
+│  3.1 读取 plan，创建 TodoWrite（不变）
+│  ┌─▶ 3.2 Implementer
+│  │       融合：上下文含 OpenSpec specs ← 改
+│  │       原流程：上下文含 *-design.md（不变）
+│  │   3.3 Spec Reviewer
+│  │       融合：对照 delta specs (SHALL/MUST + Scenario) ← 改
+│  │       原流程：对照 *-design.md（不变）
+│  │   3.4 Code Quality Reviewer
+│  │       融合：含 Risks/Trade-offs 检查 ← 微调
+│  │       原流程：不变
+│  │   3.5 标记完成
+│  └───┤ 还有 task？
+│
+│  3.6 最终代码审查（不变）
+│  3.7 → finishing-branch（不变）
+│
+▼
+finishing-branch（不变）
+│  测试 → merge/PR/keep/discard → 清理 worktree
+│
+▼ (仅融合链路)
+/opsx:archive
+│  delta → 主规范智能合并 → 归档到 archive/
+│
+▼
+openspec/specs/ 更新为长期 source of truth
+```
+
+### 7. 流程路由规则
+
+改造的核心设计原则：**大功能走融合链路获得规范沉淀，中小改动走原流程保持轻量。**
+
+#### 路由判断矩阵
+
+```
+              OpenSpec 已安装          OpenSpec 未安装
+           ┌────────────────────┬────────────────────┐
+  大功能    │ ★ 融合链路          │ 原流程              │
+  (≥2模块/  │ brainstorming      │ brainstorming      │
+   新API/   │ → /opsx:propose    │ → *-design.md      │
+   长期迭代) │ → writing-plans    │ → spec-reviewer    │
+           │ → subagent-dev     │ → writing-plans    │
+           │ → /opsx:archive    │ → subagent-dev     │
+           ├────────────────────┼────────────────────┤
+  中等任务  │ 原流程              │ 原流程              │
+  (单模块/  │ brainstorming      │ brainstorming      │
+   明确范围) │ → *-design.md      │ → *-design.md      │
+           │ → writing-plans    │ → writing-plans    │
+           │ → subagent-dev     │ → subagent-dev     │
+           ├────────────────────┼────────────────────┤
+  小修小补  │ 直接 TDD 或         │ 直接 TDD 或         │
+  (bug fix/ │ systematic-        │ systematic-        │
+   小改动)  │ debugging          │ debugging          │
+           └────────────────────┴────────────────────┘
+```
+
+#### "大功能" 判定标准
+
+满足以下**任一**条件即判定为大功能，走融合链路：
+
+| 条件 | 示例 |
+|------|------|
+| 涉及 ≥2 个独立模块/子系统 | 同时改 auth 模块和 payment 模块 |
+| 需要新建 ≥3 个文件 | 新增一个完整的 CRUD 功能 |
+| 影响公共 API 或数据模型 | 修改 REST API endpoint 签名 |
+| 有跨团队协作需求 | 前后端分离开发 |
+| 需要长期规范沉淀（后续会迭代） | 核心业务逻辑、平台能力 |
+| 含 BREAKING 变更 | 不向后兼容的接口修改 |
+
+不满足以上任何条件的，即使 OpenSpec 已安装，也走原流程——避免对简单任务施加过重流程。
+
+### 8. 改造量与风险评估
+
+#### 改造量
+
+| Skill 文件 | 改动范围 | 估计行数 | 难度 |
+|---|---|---|---|
+| `brainstorming/SKILL.md` | 步骤 1.5 增强 + 步骤 1.7-1.10 替换(含路由) + HARD-GATE 更新 | ~50 行 | 中 |
+| `writing-plans/SKILL.md` | 步骤 2.1 双路径输入 + 步骤 2.3 双路径展开 + header 格式 | ~50 行 | 中 |
+| `subagent-driven-dev/SKILL.md` | 步骤 3.2 双路径上下文 + 步骤 3.3 双路径审查 + 步骤 3.4 微调 | ~30 行 | 低 |
+
+总改动量约 130 行 SKILL.md 内容（比纯融合方案多 ~40 行，用于路由判断和原流程保留）。
+
+#### 风险与缓解
+
+| 风险 | 缓解措施 |
+|------|---------|
+| **插件更新覆盖修改**：skill 文件在 `plugins/cache/` 下，Superpowers 更新会覆盖 | 将修改后的 skill 复制到项目级 `.claude/skills/` 或用户级 `~/.claude/skills/`，利用优先级覆盖机制 |
+| **OpenSpec CLI 不可用**：某些环境未安装 OpenSpec | 在 brainstorming 1.8 前检查 `openspec` 命令是否可用，不可用则 fallback 到原流程（写 *-design.md） |
+| **specs 质量依赖 AI**：OpenSpec propose 自动生成的 specs 可能不够精确 | brainstorming 1.5 中识别的 Capabilities + 用户审阅 1.9 双重保障；必要时手动修订 spec 文件 |
+| **链路变长**：brainstorming + OpenSpec + writing-plans 三段比原来两段多一步 | OpenSpec propose 是自动化的（AI 全自动生成），实际增加的人工时间仅为 1.9 的审阅环节 |
+| **tasks.md 粒度不匹配**：OpenSpec 的粗粒度 task 可能无法 1:1 映射为 plan 的 Task | writing-plans 2.3 中允许拆分（一个 tasks.md 的 task 可展开为多个 plan Task）和合并 |
+
+### 9. 改造带来的核心收益
+
+1. **brainstorming 的交互深度 + OpenSpec 的规范正式度**：不再二选一，而是串联互补
+2. **Scenario WHEN/THEN → TDD 测试用例**：需求规范直接驱动测试，消除 spec→test 的人工翻译
+3. **Spec Reviewer 有了精确的审查基准**：从对照模糊的 design.md 变为对照 SHALL/MUST + Scenario
+4. **全链路可追溯**：brainstorming 对话 → proposal(why) → specs(what,SHALL/MUST) → plan(how,TDD steps) → code → spec review → archive → specs/ 长期演进
+5. **规范不再是一次性文档**：通过 `/opsx:archive` 的智能合并，每次变更的 delta spec 累积为项目知识库
+
+## 八、总结
+
+> **OpenSpec 是「做对的事」，Superpowers 是「把事做对」。**
+
+两者不是竞争关系，而是互补关系。OpenSpec 管理需求和规范的生命周期，Superpowers 管理实现和质量的生命周期。融合使用的关键是**按任务规模选择合适的流程深度**，避免对小任务施加大框架的开销。
+
+---
+
+## 参考资料
+
+### 源码文件（本分析的主要依据）
+
+**OpenSpec v1.3.0 源码**（`C:\Users\lioz\AppData\Roaming\npm\node_modules\@fission-ai\openspec\`）：
+- `schemas/spec-driven/schema.yaml` — artifact DAG 定义 + 各 artifact 指令
+- `schemas/spec-driven/templates/proposal.md` — proposal 模板（Why/What Changes/Capabilities/Impact）
+- `schemas/spec-driven/templates/spec.md` — delta spec 模板（ADDED/MODIFIED/REMOVED/RENAMED）
+- `schemas/spec-driven/templates/design.md` — 设计文档模板（Context/Goals/Decisions/Risks）
+- `schemas/spec-driven/templates/tasks.md` — 任务模板（编号分组 checkbox）
+- `dist/core/templates/workflows/propose.js` — `/opsx:propose` 工作流
+- `dist/core/templates/workflows/apply-change.js` — `/opsx:apply` 工作流
+- `dist/core/templates/workflows/archive-change.js` — `/opsx:archive` 工作流
+- `dist/core/templates/workflows/verify-change.js` — `/opsx:verify` 工作流
+- `dist/core/templates/workflows/sync-specs.js` — delta spec 智能合并逻辑
+
+**Superpowers v5.0.2 源码**（`C:\Users\lioz\.claude\plugins\cache\claude-plugins-official\superpowers\5.0.2\skills\`）：
+- `brainstorming/SKILL.md` — brainstorming skill（9 步 + HARD-GATE + spec 审查循环）
+- `writing-plans/SKILL.md` — writing-plans skill（Chunk/Task/Step + plan 审查循环）
+- `subagent-driven-development/SKILL.md` — subagent-driven-dev（model 选择 + 两阶段审查）
+- `executing-plans/SKILL.md` — executing-plans（无 subagent 时的执行路径）
+- `finishing-a-development-branch/SKILL.md` — finishing-branch（测试 + 四选项）
+
+### 外部参考
+
+- [OpenSpec GitHub](https://github.com/Fission-AI/OpenSpec) — 官方仓库 + README
+- [OpenSpec npm](https://www.npmjs.com/package/@fission-ai/openspec) — npm 包
