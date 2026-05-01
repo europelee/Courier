@@ -3,8 +3,10 @@
 use clap::Parser;
 use courier_server::{AppState, ServerConfig, build_router, require_admin_password};
 use courier_server::websocket::TunnelRegistry;
+use courier_server::access_log::{start_log_writer, LogEntry};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::path::PathBuf;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{error, info};
 
 #[derive(Parser, Debug)]
@@ -37,6 +39,10 @@ struct Args {
     /// TLS 密钥文件路径
     #[arg(long, default_value = "./certs/server.key")]
     key_path: Option<String>,
+
+    /// 访问日志目录
+    #[arg(long, default_value = "./logs")]
+    log_dir: String,
 }
 
 #[tokio::main]
@@ -81,6 +87,12 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // 创建访问日志 channel 并启动 writer task
+    let (log_tx, log_rx) = mpsc::channel::<LogEntry>(1000);
+    let log_dir = PathBuf::from(&args.log_dir);
+    start_log_writer(log_rx, log_dir);
+    info!("访问日志写入器已启动: {}", args.log_dir);
+
     // 创建应用状态
     let state = AppState {
         db,
@@ -89,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
             admin_password: Some(admin_password),
         }),
         tunnel_registry,
+        log_tx,
     };
 
     // 构建路由

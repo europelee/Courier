@@ -1,7 +1,7 @@
 //! HTTP 请求处理器
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -11,8 +11,13 @@ use courier_shared::{
     ApiRegisterRequest, ApiRegisterResponse, CourierError,
 };
 use uuid::Uuid;
+use std::path::PathBuf;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use chrono::Local;
 
 use crate::AppState;
+use crate::access_log::LogEntry;
 
 /// 隧道列表响应
 #[derive(Debug, Serialize, Deserialize)]
@@ -170,3 +175,66 @@ pub async fn login(
     Ok(Json(LoginResponse { token, expires_in: 86400 }))
 }
 
+/// 日志查询参数
+#[derive(Debug, serde::Deserialize)]
+pub struct LogsQuery {
+    /// 按隧道 ID 筛选
+    pub tunnel_id: Option<String>,
+    /// 返回条数限制
+    pub limit: Option<usize>,
+}
+
+/// 日志列表响应
+#[derive(Debug, serde::Serialize)]
+pub struct LogsResponse {
+    pub logs: Vec<LogEntry>,
+    pub total: usize,
+}
+
+/// 获取访问日志
+///
+/// GET /api/v1/logs?tunnel_id=&limit=
+pub async fn get_logs(
+    State(_state): State<AppState>,
+    Query(query): Query<LogsQuery>,
+) -> Result<Json<LogsResponse>, crate::errors::ApiError> {
+    let limit = query.limit.unwrap_or(100).min(1000);
+
+    // 读取当日日志文件
+    let today = Local::now().date_naive();
+    let log_path = PathBuf::from("logs").join(format!("access-{}.log", today.format("%Y-%m-%d")));
+
+    let entries: Vec<LogEntry> = if log_path.exists() {
+        let file = File::open(&log_path)
+            .map_err(|e| crate::errors::ApiError::InternalError(format!("无法打开日志文件: {}", e)))?;
+        let reader = BufReader::new(file);
+
+        // 读取所有行并解析
+        let mut all_entries: Vec<LogEntry> = reader
+            .lines()
+            .filter_map(|line| line.ok())
+            .filter_map(|line| serde_json::from_str::<LogEntry>(&line).ok())
+            .collect();
+
+        // 按隧道 ID 筛选
+        if let Some(ref tunnel_id) = query.tunnel_id {
+            if !tunnel_id.is_empty() {
+                all_entries.retain(|entry| match entry {
+                    LogEntry::HttpRequest { tunnel_id: tid, .. } => tid == tunnel_id,
+                    LogEntry::TunnelConnected { tunnel_id: tid, .. } => tid == tunnel_id,
+                    LogEntry::TunnelDisconnected { tunnel_id: tid, .. } => tid == tunnel_id,
+                });
+            }
+        }
+
+        // 取最后 N 条
+        let start = all_entries.len().saturating_sub(limit);
+        all_entries.drain(start..).collect()
+    } else {
+        Vec::new()
+    };
+
+    let total = entries.len();
+
+    Ok(Json(LogsResponse { logs: entries, total }))
+}

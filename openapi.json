@@ -23,6 +23,131 @@
     }
   ],
   "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["认证"],
+        "summary": "管理员登录",
+        "description": "使用管理员密码登录，获取 JWT 访问令牌",
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              },
+              "example": {
+                "password": "your-admin-password"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "登录成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                },
+                "example": {
+                  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  "expires_in": 86400
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "密码错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                },
+                "example": {
+                  "code": "UNAUTHORIZED",
+                  "message": "密码错误"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/logs": {
+      "get": {
+        "tags": ["日志"],
+        "summary": "获取访问日志",
+        "description": "查询访问日志列表，支持按隧道筛选。需要认证。",
+        "operationId": "getLogs",
+        "security": [{"BearerAuth": []}],
+        "parameters": [
+          {
+            "name": "tunnel_id",
+            "in": "query",
+            "required": false,
+            "description": "按隧道 ID 筛选",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "返回条数限制（默认 100，最大 1000）",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功获取日志列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsResponse"
+                },
+                "example": {
+                  "logs": [
+                    {
+                      "type": "http_request",
+                      "tunnel_id": "tun_ABC123",
+                      "method": "GET",
+                      "path": "/api/users",
+                      "status": 200,
+                      "duration_ms": 42,
+                      "timestamp": "2026-05-01T12:00:00Z"
+                    },
+                    {
+                      "type": "tunnel_connected",
+                      "tunnel_id": "tun_ABC123",
+                      "subdomain": "abc123",
+                      "local_port": 3000,
+                      "timestamp": "2026-05-01T11:55:00Z"
+                    }
+                  ],
+                  "total": 2
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": ["系统"],
@@ -208,7 +333,91 @@
     }
   },
   "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
     "schemas": {
+      "LoginRequest": {
+        "type": "object",
+        "required": ["password"],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "管理员密码"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": ["token", "expires_in"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "JWT 访问令牌"
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "令牌有效期（秒）"
+          }
+        }
+      },
+      "LogEntry": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "tunnel_id", "method", "path", "status", "duration_ms", "timestamp"],
+            "properties": {
+              "type": {"type": "string", "enum": ["http_request"]},
+              "tunnel_id": {"type": "string"},
+              "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]},
+              "path": {"type": "string"},
+              "status": {"type": "integer"},
+              "duration_ms": {"type": "integer"},
+              "timestamp": {"type": "string", "format": "date-time"}
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "tunnel_id", "subdomain", "local_port", "timestamp"],
+            "properties": {
+              "type": {"type": "string", "enum": ["tunnel_connected"]},
+              "tunnel_id": {"type": "string"},
+              "subdomain": {"type": "string"},
+              "local_port": {"type": "integer"},
+              "timestamp": {"type": "string", "format": "date-time"}
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "tunnel_id", "timestamp"],
+            "properties": {
+              "type": {"type": "string", "enum": ["tunnel_disconnected"]},
+              "tunnel_id": {"type": "string"},
+              "timestamp": {"type": "string", "format": "date-time"}
+            }
+          }
+        ]
+      },
+      "LogsResponse": {
+        "type": "object",
+        "required": ["logs", "total"],
+        "properties": {
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "日志总数"
+          }
+        }
+      },
       "HealthCheckResponse": {
         "type": "object",
         "required": ["status", "version"],
@@ -407,8 +616,16 @@
       "description": "系统相关的操作"
     },
     {
+      "name": "认证",
+      "description": "用户认证与授权"
+    },
+    {
       "name": "隧道管理",
       "description": "隧道生命周期管理 (创建、查询、删除)"
+    },
+    {
+      "name": "日志",
+      "description": "访问日志查询"
     }
   ]
 }

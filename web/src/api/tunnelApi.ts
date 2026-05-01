@@ -240,3 +240,67 @@ export function disconnectWebSocket(): void {
     ws = null
   }
 }
+
+// ===== 访问日志 API =====
+
+export interface HttpRequestLog {
+  type: 'http_request'
+  tunnel_id: string
+  method: string
+  path: string
+  status: number
+  duration_ms: number
+  timestamp: string
+}
+
+export interface TunnelConnectedLog {
+  type: 'tunnel_connected'
+  tunnel_id: string
+  subdomain: string
+  local_port: number
+  timestamp: string
+}
+
+export interface TunnelDisconnectedLog {
+  type: 'tunnel_disconnected'
+  tunnel_id: string
+  timestamp: string
+}
+
+export type LogEntry = HttpRequestLog | TunnelConnectedLog | TunnelDisconnectedLog
+
+export interface LogsResponse {
+  logs: LogEntry[]
+  total: number
+}
+
+export interface LogsQuery {
+  tunnel_id?: string
+  limit?: number
+}
+
+export const getLogs = async (query?: LogsQuery): Promise<LogsResponse> => {
+  const params = new URLSearchParams()
+  if (query?.tunnel_id) {
+    params.set('tunnel_id', query.tunnel_id)
+  }
+  if (query?.limit) {
+    params.set('limit', query.limit.toString())
+  }
+  const queryString = params.toString()
+  const url = `${API_BASE_URL}/api/v1/logs${queryString ? '?' + queryString : ''}`
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
+  })
+
+  if (!res.ok) {
+    throw new Error(`HTTP error! status: ${res.status}`)
+  }
+
+  return res.json()
+}

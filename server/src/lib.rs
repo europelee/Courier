@@ -1,7 +1,9 @@
+pub mod access_log;
 pub mod auth;
 pub mod db;
 pub mod errors;
 pub mod handlers;
+pub mod middleware;
 pub mod websocket;
 pub mod validation;
 pub mod test_helpers;
@@ -15,11 +17,13 @@ use axum::{
 };
 use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{error, info, warn};
 use courier_shared::HealthCheckResponse;
 use futures_util::stream::StreamExt;
 use futures_util::sink::SinkExt;
+
+use crate::access_log::LogEntry;
 
 /// 应用状态（共享状态容器）
 #[derive(Clone)]
@@ -32,6 +36,9 @@ pub struct AppState {
 
     /// 隧道注册表
     pub tunnel_registry: Arc<Mutex<websocket::TunnelRegistry>>,
+
+    /// 访问日志发送端
+    pub log_tx: mpsc::Sender<LogEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,13 +49,17 @@ pub struct ServerConfig {
 
 pub fn build_router(state: AppState) -> Router {
     use axum::middleware;
+    use tower::ServiceBuilder;
 
     let protected = Router::new()
         .route("/api/v1/tunnels", post(handlers::register_tunnel))
         .route("/api/v1/tunnels", get(handlers::list_tunnels))
         .route("/api/v1/tunnels/:courier_id", get(handlers::get_tunnel_status))
         .route("/api/v1/tunnels/:courier_id", delete(handlers::delete_tunnel))
+        .route("/api/v1/logs", get(handlers::get_logs))
         .layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
+
+    let log_tx = state.log_tx.clone();
 
     Router::new()
         .route("/health", get(health_check))
@@ -57,6 +68,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/auth/login", post(handlers::login))
         .merge(protected)
         .fallback(proxy_handler)
+        .layer(ServiceBuilder::new().layer(crate::middleware::AccessLogLayer::new(log_tx)))
         .with_state(state)
 }
 
@@ -197,6 +209,15 @@ async fn handle_client_connection(
     state.tunnel_registry.lock().await
         .register_client_raw(courier_id.clone(), session, established_msg).await;
 
+    // 记录隧道连接事件
+    let connected_entry = LogEntry::TunnelConnected {
+        tunnel_id: courier_id.clone(),
+        subdomain: subdomain.clone(),
+        local_port: req.local_port,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = state.log_tx.try_send(connected_entry);
+
     info!("courier-client registered: {} ({})", courier_id, subdomain);
 
     while let Some(msg) = receiver.next().await {
@@ -234,6 +255,14 @@ async fn handle_client_connection(
     reg.remove_client(&courier_id);
     reg.broadcast_disconnected(&courier_id).await;
     drop(reg);
+
+    // 记录隧道断开事件
+    let disconnected_entry = LogEntry::TunnelDisconnected {
+        tunnel_id: courier_id.clone(),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = state.log_tx.try_send(disconnected_entry);
+
     let _ = crate::db::update_tunnel_status(&state.db, &courier_id, "disconnected").await;
     info!("courier-client disconnected: {}", courier_id);
 }
