@@ -90,11 +90,13 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), CourierError> {
         CREATE TABLE IF NOT EXISTS access_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             courier_id TEXT NOT NULL,
-            remote_addr TEXT NOT NULL,
+            remote_addr TEXT,
             path TEXT NOT NULL,
             status_code INTEGER NOT NULL,
-            bytes_sent INTEGER NOT NULL,
-            timestamp INTEGER NOT NULL
+            bytes_sent INTEGER,
+            timestamp INTEGER NOT NULL,
+            method TEXT,
+            duration_ms INTEGER
         );
         "#,
     )
@@ -112,6 +114,12 @@ async fn init_schema(pool: &SqlitePool) -> Result<(), CourierError> {
         .execute(pool)
         .await
         .map_err(|e| CourierError::DatabaseError(e.to_string()))?;
+
+    // 迁移：为现有表添加新列（忽略已存在错误）
+    let _ = sqlx::query("ALTER TABLE access_logs ADD COLUMN method TEXT;")
+        .execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE access_logs ADD COLUMN duration_ms INTEGER;")
+        .execute(pool).await;
 
     Ok(())
 }

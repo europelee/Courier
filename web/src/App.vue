@@ -130,16 +130,64 @@
 
         <!-- 日志查看 -->
         <div v-else-if="currentView === 'logs'" class="view-container">
-          <h3>系统日志</h3>
-          <div class="logs">
-            <div v-if="logs.length === 0" class="empty-state">
-              <p>暂无日志</p>
+          <h3>访问日志</h3>
+
+          <!-- 汇总卡片 -->
+          <div class="summary-cards">
+            <div class="summary-card">
+              <span class="summary-label">总请求数</span>
+              <span class="summary-value">{{ logTotalRequests }}</span>
             </div>
-            <div v-else>
-              <div v-for="(log, index) in logs" :key="index" :class="['log-entry', log.level]">
-                <span class="timestamp">{{ log.timestamp }}</span>
-                <span class="level">{{ log.level }}</span>
-                <span class="message">{{ log.message }}</span>
+            <div class="summary-card">
+              <span class="summary-label">错误率</span>
+              <span class="summary-value">{{ logErrorRate }}%</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">平均响应时间</span>
+              <span class="summary-value">{{ logAvgResponseTime }}ms</span>
+            </div>
+          </div>
+
+          <!-- 筛选下拉 -->
+          <div class="filter-row">
+            <label>按隧道筛选：</label>
+            <select v-model="selectedTunnelId" @change="fetchAccessLogs">
+              <option value="">全部隧道</option>
+              <option v-for="t in tunnels" :key="t.id" :value="t.id">{{ t.subdomain }}</option>
+            </select>
+            <button class="btn btn-small" @click="fetchAccessLogs" :disabled="isLoadingLogs">
+              {{ isLoadingLogs ? '刷新中...' : '刷新' }}
+            </button>
+          </div>
+
+          <!-- 日志列表 -->
+          <div class="logs">
+            <div v-if="isLoadingLogs" class="loading">
+              <div class="spinner"></div>
+              <p>加载中...</p>
+            </div>
+            <div v-else-if="accessLogs.length === 0" class="empty-state">
+              <p>暂无访问日志</p>
+            </div>
+            <div v-else class="log-list">
+              <div v-for="(log, index) in accessLogs" :key="index" class="access-log-entry">
+                <template v-if="log.type === 'http_request'">
+                  <span class="log-method" :class="'method-' + log.method.toLowerCase()">{{ log.method }}</span>
+                  <span class="log-path">{{ log.path }}</span>
+                  <span class="log-status" :class="log.status >= 400 ? 'status-error' : 'status-ok'">{{ log.status }}</span>
+                  <span class="log-duration">{{ log.duration_ms }}ms</span>
+                  <span class="log-time">{{ log.timestamp }}</span>
+                </template>
+                <template v-else-if="log.type === 'tunnel_connected'">
+                  <span class="log-event event-connect">🔗 连接</span>
+                  <span class="log-info">{{ log.subdomain }}:{{ log.local_port }}</span>
+                  <span class="log-time">{{ log.timestamp }}</span>
+                </template>
+                <template v-else-if="log.type === 'tunnel_disconnected'">
+                  <span class="log-event event-disconnect">断开</span>
+                  <span class="log-info">{{ log.tunnel_id }}</span>
+                  <span class="log-time">{{ log.timestamp }}</span>
+                </template>
               </div>
             </div>
           </div>
@@ -173,10 +221,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as api from './api/tunnelApi'
 import { connectWebSocket, disconnectWebSocket, login as apiLogin, setStoredToken, clearStoredToken, getStoredToken } from './api/tunnelApi'
-import type { TunnelConnectedEvent, TunnelDisconnectedEvent, StatsUpdateEvent, WsEventHandler } from './api/tunnelApi'
+import type { TunnelConnectedEvent, TunnelDisconnectedEvent, StatsUpdateEvent, WsEventHandler, LogEntry } from './api/tunnelApi'
 
 interface Tunnel {
   id: string
@@ -198,6 +246,14 @@ const activeTunnels = ref(0)
 const totalBytes = ref(0)
 const errorCount = ref(0)
 const avgResponseTime = ref(0)
+
+// 访问日志状态
+const accessLogs = ref<LogEntry[]>([])
+const selectedTunnelId = ref<string>('')
+const isLoadingLogs = ref(false)
+const logTotalRequests = ref(0)
+const logErrorRate = ref(0)
+const logAvgResponseTime = ref(0)
 
 // 加载状态
 const isLoading = ref(false)
@@ -322,6 +378,36 @@ const checkHealth = async () => {
   }
 }
 
+// 获取访问日志
+const fetchAccessLogs = async () => {
+  isLoadingLogs.value = true
+  try {
+    const response = await api.getLogs({
+      tunnel_id: selectedTunnelId.value || undefined,
+      limit: 100
+    })
+    accessLogs.value = response.logs
+
+    // 计算汇总统计
+    const httpLogs = response.logs.filter(l => l.type === 'http_request') as api.HttpRequestLog[]
+    logTotalRequests.value = httpLogs.length
+
+    if (httpLogs.length > 0) {
+      const errorLogs = httpLogs.filter(l => l.status >= 400)
+      logErrorRate.value = Math.round((errorLogs.length / httpLogs.length) * 100)
+      const totalDuration = httpLogs.reduce((sum, l) => sum + l.duration_ms, 0)
+      logAvgResponseTime.value = Math.round(totalDuration / httpLogs.length)
+    } else {
+      logErrorRate.value = 0
+      logAvgResponseTime.value = 0
+    }
+  } catch (error) {
+    addLog('ERROR', '获取访问日志失败：' + String(error))
+  } finally {
+    isLoadingLogs.value = false
+  }
+}
+
 // WebSocket 事件处理器
 const wsHandlers: WsEventHandler = {
   onConnected(evt: TunnelConnectedEvent) {
@@ -398,6 +484,13 @@ onMounted(async () => {
   if (isLoggedIn.value) {
     await fetchTunnels()
     connectWebSocket(wsHandlers)
+  }
+})
+
+// 监听视图切换，切换到日志页时加载数据
+watch(currentView, (newView) => {
+  if (newView === 'logs' && isLoggedIn.value) {
+    fetchAccessLogs()
   }
 })
 
@@ -764,5 +857,123 @@ onUnmounted(() => {
 
 .btn-danger:hover {
   background: #c0392b;
+}
+
+/* 访问日志样式 */
+.summary-cards {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.summary-card {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 15px 20px;
+  text-align: center;
+}
+
+.summary-label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.summary-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.filter-row select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  min-width: 150px;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.access-log-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-bottom: 1px solid #e0e0e0;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.log-method {
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 3px;
+  min-width: 50px;
+  text-align: center;
+}
+
+.method-get { background: #e3f2fd; color: #1976d2; }
+.method-post { background: #e8f5e9; color: #388e3c; }
+.method-put { background: #fff3e0; color: #f57c00; }
+.method-delete { background: #ffebee; color: #d32f2f; }
+
+.log-path {
+  flex: 1;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-status {
+  font-weight: bold;
+  min-width: 40px;
+}
+
+.status-ok { color: #388e3c; }
+.status-error { color: #d32f2f; }
+
+.log-duration {
+  color: #666;
+  min-width: 60px;
+  text-align: right;
+}
+
+.log-time {
+  color: #999;
+  min-width: 80px;
+  text-align: right;
+}
+
+.log-event {
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.event-connect {
+  background: #e8f5e9;
+  color: #388e3c;
+}
+
+.event-disconnect {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
+.log-info {
+  flex: 1;
+  color: #333;
 }
 </style>
